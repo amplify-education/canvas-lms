@@ -38,7 +38,7 @@ function installed {
 
 if [[ $OS == 'Darwin' ]]; then
   install='brew install'
-  dependencies='docker docker-machine docker-compose dinghy'
+  dependencies='docker docker-machine docker-compose'
 elif [[ $OS == 'Linux' ]]; then
   install='sudo apt-get update && sudo apt-get install -y'
   dependencies='docker-compose'
@@ -72,20 +72,21 @@ function install_dependencies {
   done
   [[ ${#packages[@]} -gt 0 ]] || return 0
 
-  message "First, we need to install some dependencies."
-  if [[ $OS == 'Darwin' ]]; then
-    if ! installed brew; then
-      echo 'We need homebrew to install dependencies, please install that first!'
-      echo 'See https://brew.sh/'
-      exit 1
-    elif ! brew ls --versions dinghy > /dev/null; then
-      brew tap codekitchen/dinghy
-    fi
-  elif [[ $OS == 'Linux' ]] && ! installed apt-get; then
-    echo 'This script only supports Debian-based Linux (for now - contributions welcome!)'
-    exit 1
-  fi
   confirm_command "$install ${packages[*]}"
+
+  # message "First, we need to install some dependencies."
+  # if [[ $OS == 'Darwin' ]]; then
+  #   if ! installed brew; then
+  #     echo 'We need homebrew to install dependencies, please install that first!'
+  #     echo 'See https://brew.sh/'
+  #     exit 1
+  #   elif ! brew ls --versions dinghy > /dev/null; then
+  #     brew tap codekitchen/dinghy
+  #   fi
+  # elif [[ $OS == 'Linux' ]] && ! installed apt-get; then
+  #   echo 'This script only supports Debian-based Linux (for now - contributions welcome!)'
+  #   exit 1
+  # fi
 }
 
 function create_dinghy_vm {
@@ -184,8 +185,10 @@ function setup_docker_environment {
   install_dependencies
   if [[ $OS == 'Darwin' ]]; then
     message "It looks like you're using a Mac. You'll need a dinghy VM. Let's set that up."
-    create_dinghy_vm
-    start_dinghy_vm
+    # create_dinghy_vm
+    # start_dinghy_vm
+    install_dory
+    start_dory
   elif [[ $OS == 'Linux' ]]; then
     message "It looks like you're using Linux. You'll need dory. Let's set that up."
     start_docker_daemon

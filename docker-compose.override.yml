@@ -12,6 +12,8 @@ services:
       - canvas-docker-gems:/home/docker/.gem/
       - canvas-planner_node_modules:/usr/src/app/packages/canvas-planner/node_modules
       - canvas-planner_lib:/usr/src/app/packages/canvas-planner/lib
+      - canvas-rce_node_modules:/usr/src/app/packages/canvas-rce/node_modules
+      - canvas-rce_lib:/usr/src/app/packages/canvas-rce/lib
       - generated_1:/usr/src/app/public/javascripts/client_apps
       - generated_2:/usr/src/app/public/dist
       - generated_3:/usr/src/app/public/javascripts/compiled
@@ -33,6 +35,7 @@ services:
     environment: &BASE-ENV
       RAILS_ENV: development
       ENCRYPTION_KEY: facdd3a131ddd8988b14f6e4e01039c93cfa0160
+      PASSENGER_STARTUP_TIMEOUT: 3600
 
   webpack:
     <<: *BASE
@@ -65,6 +68,8 @@ volumes:
   canvas-docker-gems: {}
   canvas-planner_node_modules: {}
   canvas-planner_lib: {}
+  canvas-rce_node_modules: {}
+  canvas-rce_lib: {}
   generated_1: {}
   generated_2: {}
   generated_3: {}
