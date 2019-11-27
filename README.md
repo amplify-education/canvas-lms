@@ -5,6 +5,10 @@ The changes in this fork enables running canvas on a mac machine just with docke
 In some machines where the user can not turn off the firewall they wont be able to modify some network files that may be
 required for setting up canvas properly in a virtualbox using dinghy tool.
 
+To make sure your application has enough memory, increase the memory allocated to docker to a little more than 8 gb.
+(Recommend 12gb). This would mean that you will need to have a machine that has atleast 16 gb of system memory to run
+Canvas LMS locally
+
 Canvas LMS
 ======
 
