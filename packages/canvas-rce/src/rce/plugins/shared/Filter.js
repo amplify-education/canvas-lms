@@ -49,7 +49,7 @@ export function useFilterSettings() {
 function fileLabelFromContext(contextType) {
   switch (contextType) {
     case 'user':
-      return formatMessage('My Files')
+      return formatMessage('User Files')
     case 'course':
       return formatMessage('Course Files')
     case 'group':
@@ -59,30 +59,35 @@ function fileLabelFromContext(contextType) {
   }
 }
 
-// ui-forms/Select chokes if one of the options is
-// undefined, which happens if you conditionally
-// create one like {test && <option>...</option>}
-// so build the options list more carefully here
-function buildContentOptions(userContextType) {
-  const contentOptions = [
-    <option key="links" value="links" icon={IconLinkLine}>
-      {formatMessage('Links')}
-    </option>,
-    <option key="user_files" value="user_files" icon={IconFolderLine}>
-      {fileLabelFromContext('user')}
-    </option>
-  ]
-
+function renderType(contentType, onChange, userContextType) {
   if (userContextType === 'course') {
-    contentOptions.splice(
-      1,
-      0,
-      <option key="course_files" value="course_files" icon={IconFolderLine}>
-        {fileLabelFromContext('course')}
-      </option>
+    return (
+      <Select
+        label={<ScreenReaderContent>{formatMessage('Content Type')}</ScreenReaderContent>}
+        onChange={(e, selection) => {
+          onChange({contentType: selection.value})
+        }}
+        selectedOption={contentType}
+      >
+        <option key="links" value="links" icon={IconLinkLine}>
+          {formatMessage('Links')}
+        </option>
+        <option key="course_files" value="course_files" icon={IconFolderLine}>
+          {fileLabelFromContext('course')}
+        </option>
+        <option key="user_files" value="user_files" icon={IconFolderLine}>
+          {fileLabelFromContext('user')}
+        </option>
+      </Select>
+    )
+  } else {
+    return (
+      <View as="div" borderWidth="small" padding="x-small small" borderRadius="medium" width="100%">
+        <ScreenReaderContent>{formatMessage('Content Type')}</ScreenReaderContent>
+        {fileLabelFromContext('user')}
+      </View>
     )
   }
-  return contentOptions
 }
 
 export default function Filter(props) {
@@ -95,16 +100,7 @@ export default function Filter(props) {
 
   return (
     <View display="block" direction="column">
-      <Select
-        label={<ScreenReaderContent>{formatMessage('Content Type')}</ScreenReaderContent>}
-        onChange={(e, selection) => {
-          onChange({contentType: selection.value})
-        }}
-        selectedOption={contentType}
-      >
-        {buildContentOptions(userContextType)}
-      </Select>
-
+      {renderType(contentType, onChange, userContextType)}
       {contentType !== 'links' && (
         <Flex margin="small none none none">
           <Flex.Item grow shrink margin="none xx-small none none">
@@ -131,21 +127,20 @@ export default function Filter(props) {
             </Select>
           </Flex.Item>
 
-          <Flex.Item grow shrink margin="none none none xx-small">
-            <Select
-              label={<ScreenReaderContent>{formatMessage('Sort By')}</ScreenReaderContent>}
-              onChange={(e, selection) => {
-                onChange({sortValue: selection.value})
-              }}
-              selectedOption={sortValue}
-            >
-              <option value="date_added">{formatMessage('Date Added')}</option>
-
-              <option value="alphabetical">{formatMessage('Alphabetical')}</option>
-
-              <option value="date_published">{formatMessage('Date Published')}</option>
-            </Select>
-          </Flex.Item>
+          {contentSubtype !== 'all' && (
+            <Flex.Item grow shrink margin="none none none xx-small">
+              <Select
+                label={<ScreenReaderContent>{formatMessage('Sort By')}</ScreenReaderContent>}
+                onChange={(e, selection) => {
+                  onChange({sortValue: selection.value})
+                }}
+                selectedOption={sortValue}
+              >
+                <option value="date_added">{formatMessage('Date Added')}</option>
+                <option value="alphabetical">{formatMessage('Alphabetical')}</option>
+              </Select>
+            </Flex.Item>
+          )}
         </Flex>
       )}
     </View>

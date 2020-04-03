@@ -525,12 +525,7 @@ describe User do
   end
 
   describe "#recent_feedback" do
-    let_once(:post_policies_course) do
-      course = Course.create!(workflow_state: :available)
-      course.enable_feature!(:new_gradebook)
-      PostPolicy.enable_feature!
-      course
-    end
+    let_once(:post_policies_course) { Course.create!(workflow_state: :available) }
     let_once(:auto_posted_assignment) { post_policies_course.assignments.create!(points_possible: 10) }
     let_once(:manual_posted_assignment) do
       assignment = post_policies_course.assignments.create!(points_possible: 10)
@@ -538,34 +533,12 @@ describe User do
       assignment
     end
 
-    let_once(:old_course) { Course.create!(workflow_state: :available) }
-    let_once(:unmuted_assignment) { old_course.assignments.create!(points_possible: 10) }
-    let_once(:muted_assignment) do
-      assignment = old_course.assignments.create!(points_possible: 10)
-      assignment.mute!
-      assignment
-    end
-
     let_once(:student) { User.create! }
     let_once(:teacher) { User.create! }
 
     before(:once) do
-      [post_policies_course, old_course].each do |course|
-        course.enroll_student(student, enrollment_state: :active)
-        course.enroll_teacher(teacher, enrollment_state: :active)
-      end
-    end
-
-    context "for a non-Post Policies course" do
-      it "does not include recent feedback for muted assignments" do
-        muted_assignment.grade_student(student, grader: teacher, score: 10)
-        expect(student.recent_feedback).to be_empty
-      end
-
-      it "includes recent feedback for unmuted assignments" do
-        unmuted_assignment.grade_student(student, grader: teacher, score: 10)
-        expect(student.recent_feedback).to contain_exactly(unmuted_assignment.submission_for_student(student))
-      end
+      post_policies_course.enroll_student(student, enrollment_state: :active)
+      post_policies_course.enroll_teacher(teacher, enrollment_state: :active)
     end
 
     context "for a course with Post Policies enabled" do
@@ -598,27 +571,28 @@ describe User do
       end
     end
 
-    context "when considering both types of courses simultaneously" do
-      it "only returns feedback for posted submissions and unmuted assignments" do
-        muted_assignment.grade_student(student, grader: teacher, score: 10)
-        unmuted_assignment.grade_student(student, grader: teacher, score: 10)
-        auto_posted_assignment.grade_student(student, grader: teacher, score: 10)
-        manual_posted_assignment.grade_student(student, grader: teacher, score: 10)
+    it "only returns feedback for posted submissions" do
+      auto_posted_assignment.grade_student(student, grader: teacher, score: 10)
+      manual_posted_assignment.grade_student(student, grader: teacher, score: 10)
 
-        expect(student.recent_feedback).to contain_exactly(
-          unmuted_assignment.submission_for_student(student),
-          auto_posted_assignment.submission_for_student(student)
-        )
-      end
+      expect(student.recent_feedback).to contain_exactly(
+        auto_posted_assignment.submission_for_student(student)
+      )
+    end
 
-      it "only returns feedback for specific courses if specified" do
-        unmuted_assignment.grade_student(student, grader: teacher, score: 10)
-        auto_posted_assignment.grade_student(student, grader: teacher, score: 10)
+    it "only returns feedback for specific courses if specified" do
+      other_course = Course.create!(workflow_state: :available)
+      other_course.enroll_student(student, enrollment_state: :active)
+      other_course.enroll_teacher(teacher, enrollment_state: :active)
+      auto_assignment = other_course.assignments.create!(points_possible: 10)
+      manual_assignment = other_course.assignments.create!(points_possible: 10)
+      manual_assignment.post_policy.update!(post_manually: true)
 
-        expect(student.recent_feedback(contexts: [post_policies_course])).to contain_exactly(
-          auto_posted_assignment.submission_for_student(student)
-        )
-      end
+      auto_assignment.grade_student(student, grader: teacher, score: 10)
+
+      expect(student.recent_feedback(contexts: [other_course])).to contain_exactly(
+        auto_assignment.submission_for_student(student)
+      )
     end
 
     it "includes recent feedback for student view users" do
@@ -806,6 +780,22 @@ describe User do
     expect(@user.workflow_state).to eq "deleted"
     @user.reload
     expect(@user.workflow_state).to eq "deleted"
+  end
+
+  it "destroys associated active eportfolios upon soft-deletion" do
+    user = User.create
+    user.eportfolios.create!
+    expect { user.destroy }.to change {
+      user.reload.eportfolios.active.count
+    }.from(1).to(0)
+  end
+
+  it "destroys associated active eportfolios when removed from root account" do
+    user = User.create
+    user.eportfolios.create!
+    expect { user.remove_from_root_account(Account.default) }.to change {
+      user.reload.eportfolios.active.count
+    }.from(1).to(0)
   end
 
   it "should record deleted_at" do
@@ -2588,6 +2578,40 @@ describe User do
         expect(@student.grants_right?(@sub_admin, :generate_observer_pairing_code)).to eq false
       end
     end
+
+    describe ":moderate_user_content" do
+      before(:once) do
+        root_account = Account.default
+        @root_admin = account_admin_user(account: root_account)
+        sub_account = Account.create!(root_account: root_account)
+        @sub_admin = account_admin_user(account: sub_account)
+        @student = course_with_student(account: sub_account, active_all: true).user
+      end
+
+      it "cannot moderate your own content" do
+        expect(@student.grants_right?(@student, :moderate_user_content)).to be false
+      end
+
+      it "cannot moderate content if you are an admin without permission to moderate user content" do
+        Account.default.role_overrides.create!(role: admin_role, enabled: false, permission: :moderate_user_content)
+        expect(@student.grants_right?(@root_admin, :moderate_user_content)).to be false
+      end
+
+      it "cannot moderate content if you are a subadmin without permission to moderate user content" do
+        Account.default.role_overrides.create!(role: admin_role, enabled: false, permission: :moderate_user_content)
+        expect(@student.grants_right?(@sub_admin, :moderate_user_content)).to be false
+      end
+
+      it "can moderate content if you are an admin with permission to moderate user content" do
+        Account.default.role_overrides.create!(role: admin_role, enabled: true, permission: :moderate_user_content)
+        expect(@student.grants_right?(@root_admin, :moderate_user_content)).to be true
+      end
+
+      it "can moderate content if you are a subadmin with permission to moderate user content" do
+        Account.default.role_overrides.create!(role: admin_role, enabled: true, permission: :moderate_user_content)
+        expect(@student.grants_right?(@sub_admin, :moderate_user_content)).to be true
+      end
+    end
   end
 
   describe "check_accounts_right?" do
@@ -2878,11 +2902,13 @@ describe User do
     end
 
     it 'caches results' do
-      sub_account = @account.sub_accounts.create!
-      sub_account.account_users.create!(:user => @user, :role => admin_role)
-      result = @user.roles(@account)
-      sub_account.destroy!
-      expect(@user.roles(@account)).to eq result
+      enable_cache do
+        sub_account = @account.sub_accounts.create!
+        sub_account.account_users.create!(:user => @user, :role => admin_role)
+        result = @user.roles(@account)
+        sub_account.destroy!
+        expect(@user.roles(@account)).to eq result
+      end
     end
 
     context 'exclude_deleted_accounts' do
@@ -3140,6 +3166,42 @@ describe User do
     end
   end
 
+  describe "limit_parent_app_web_access?" do
+    before(:once) do
+      user_with_pseudonym
+      @pseudonym.account.settings[:limit_parent_app_web_access] = nil
+      @pseudonym.account.save!
+    end
+
+    it "does not limit parent app web access by default" do
+      expect(@user.limit_parent_app_web_access?).to eq false
+    end
+
+    it "does limit if the pseudonym limits this" do
+      @pseudonym.account.settings[:limit_parent_app_web_access] = true
+      @pseudonym.account.save!
+      expect(@user.limit_parent_app_web_access?).to eq true
+    end
+
+    describe "multiple pseudonyms" do
+      before(:once) do
+        @other_account = Account.create :name => 'Other Account'
+        @other_account.settings[:limit_parent_app_web_access] = true
+        @other_account.save!
+        user_with_pseudonym(:user => @user, :account => @other_account)
+      end
+
+      it "limits if one pseudonym's account limits this" do
+        expect(@user.limit_parent_app_web_access?).to eq true
+      end
+
+      it "doesn't limit if only a deleted pseudonym's account limits this" do
+        @user.pseudonyms.where(account_id: @other_account).first.destroy
+        expect(@user.limit_parent_app_web_access?).to eq false
+      end
+    end
+  end
+
   describe 'generate_observer_pairing_code' do
     before(:once) do
       course_with_student
@@ -3150,6 +3212,24 @@ describe User do
       @student.generate_observer_pairing_code
       pairing_code = @student.generate_observer_pairing_code
       expect(pairing_code.code).to eq '123abc'
+    end
+  end
+
+  describe "#prefers_no_celebrations?" do
+    let(:user) { user_model }
+
+    it "returns false by default" do
+      expect(user.prefers_no_celebrations?).to eq false
+    end
+
+    context "user has opted out of celebrations" do
+      before :each do
+        user.enable_feature!(:disable_celebrations)
+      end
+
+      it "returns true" do
+        expect(user.prefers_no_celebrations?).to eq true
+      end
     end
   end
 end

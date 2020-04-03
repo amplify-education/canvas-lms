@@ -37,7 +37,14 @@ describe UserMerge do
       expect { UserMerge.from(user2).into(fake_student) }.to raise_error('cannot merge a test student')
     end
 
-    it 'should require mark as failed on failure users' do
+    it 'should log who did the user merge' do
+      merger = user_model
+      mergeme = UserMerge.from(user2)
+      mergeme.into(user1, merger: merger, source: 'this spec')
+      expect(mergeme.merge_data.items.where(item_type: 'logs').take.item).to eq "{:merger_id=>#{merger.id}, :source=>\"this spec\"}"
+    end
+
+    it 'should mark as failed on merge failures' do
       mergeme = UserMerge.from(user2)
       # make any method that gets called raise an error
       allow(mergeme).to receive(:copy_favorites).and_raise('boom')
@@ -689,7 +696,7 @@ describe UserMerge do
   context "sharding" do
     specs_require_sharding
 
-    it 'should move prefs over' do
+    it 'should move prefs over with old format' do
       @shard1.activate do
         @user2 = user_model
         account = Account.create!
@@ -704,7 +711,22 @@ describe UserMerge do
       expect(user1.reload.preferences[:custom_colors].keys).to eq ["course_#{@shard_course.global_id}", "course_#{course.id}"]
     end
 
-    it 'should move nicknames' do
+    it 'should move prefs over with new format' do
+      @shard1.activate do
+        @user2 = user_model
+        account = Account.create!
+        @shard_course = course_factory(account: account)
+      end
+      course = course_factory
+      user1 = user_model
+      @user2.set_preference(:custom_colors,
+        {"course_#{@shard_course.local_id}" => "#254284", "course_#{course.global_id}" => "#346543"})
+      UserMerge.from(@user2).into(user1)
+      expect(user1.reload.get_preference(:custom_colors)).to eq (
+        {"course_#{@shard_course.global_id}" => "#254284", "course_#{course.local_id}" => "#346543"})
+    end
+
+    it 'should move nicknames with old format' do
       @shard1.activate do
         @user2 = user_model
         account = Account.create!
@@ -717,6 +739,23 @@ describe UserMerge do
       @user2.save!
       UserMerge.from(@user2).into(user1)
       expect(user1.reload.preferences[:course_nicknames].keys).to eq [@shard_course.global_id, course.id]
+    end
+
+    it 'should move nicknames with new format' do
+      @shard1.activate do
+        @user2 = user_model
+        account = Account.create!
+        @shard_course = course_factory(account: account)
+        @user2.set_preference(:course_nicknames, @shard_course.id, "Marketing")
+      end
+      course = course_factory
+      user1 = user_model
+      @user2.set_preference(:course_nicknames, course.global_id, "Math")
+      @user2.save!
+      UserMerge.from(@user2).into(user1)
+      user1.reload
+      expect(user1.get_preference(:course_nicknames, @shard_course.global_id)).to eq "Marketing"
+      expect(user1.get_preference(:course_nicknames, course.id)).to eq "Math"
     end
 
     it 'should handle favorites' do

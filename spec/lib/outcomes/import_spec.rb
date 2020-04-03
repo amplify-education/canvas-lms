@@ -146,7 +146,6 @@ RSpec.describe Outcomes::Import do
 
       it 'uses the right vendor_guid clause' do
         different_guid = group_attributes.merge(vendor_guid: 'vg2')
-        allow(AcademicBenchmark).to receive(:use_new_guid_columns?).and_return true
         existing_group.update! vendor_guid: different_guid[:vendor_guid]
         importer.import_group(different_guid)
         expect(existing_group.reload.title).to eq "i'm a group"
@@ -312,7 +311,6 @@ RSpec.describe Outcomes::Import do
 
       it 'uses the right vendor_guid clause' do
         different_guid = outcome_attributes.merge(vendor_guid: 'vg2')
-        allow(AcademicBenchmark).to receive(:use_new_guid_columns?).and_return true
         existing_outcome.update! vendor_guid: different_guid[:vendor_guid]
         importer.import_outcome(different_guid)
         expect(existing_outcome.reload.title).to eq "i'm an outcome"
@@ -415,7 +413,15 @@ RSpec.describe Outcomes::Import do
       it 'reassigns parents of existing outcome' do
         parent1.add_outcome(existing_outcome)
         importer.import_outcome(**outcome_attributes, parent_guids: 'parent2')
-          expect(parent1.child_outcome_links.active.map(&:content)).to be_empty
+        expect(parent1.child_outcome_links.active.map(&:content)).to be_empty
+        expect(parent2.child_outcome_links.active.map(&:content)).to include existing_outcome
+      end
+
+      it 'reassigns parents of an aligned outcome' do
+        outcome_with_rubric(outcome: existing_outcome)
+        parent1.add_outcome(existing_outcome)
+        importer.import_outcome(**outcome_attributes, parent_guids: 'parent2')
+        expect(parent1.child_outcome_links.active.map(&:content)).to be_empty
         expect(parent2.child_outcome_links.active.map(&:content)).to include existing_outcome
       end
 

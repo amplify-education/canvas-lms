@@ -19,6 +19,7 @@
 export default class FakeEditor {
   constructor() {
     this._$container = null
+    this.rceWrapper = {}
 
     this._selectedNode = null
 
@@ -45,12 +46,19 @@ export default class FakeEditor {
 
     this.dom = {
       getParent: (el, selector) => {
-        const parent = el && el.parentElement
-        const grandparent = parent && parent.parentElement
-        if (grandparent && grandparent.querySelector(selector) === parent) {
-          return parent
+        let ancestor = el && el.parentNode
+        while (ancestor) {
+          const candidate = ancestor.querySelector(selector)
+          if (candidate) return candidate
+          ancestor = ancestor.parentNode
         }
         return null
+      },
+      setAttrib: (elem, attr, value) => {
+        elem.setAttribute(attr, value)
+      },
+      getAttrib: (elem, attr) => {
+        return elem.getAttribute(attr)
       },
       setAttribs: (elem, hash) => {
         Object.keys(hash).forEach(k => {
@@ -61,7 +69,14 @@ export default class FakeEditor {
           }
         })
       },
-      setStyles: (_elem, _hash) => {}
+      setStyles: (elem, hash) => {
+        Object.keys(hash).forEach(k => {
+          elem.style[k] = hash[k]
+        })
+      },
+      replace: (newelem, oldelem) => {
+        return oldelem.parentNode.replaceChild(newelem, oldelem)
+      }
     }
   }
 

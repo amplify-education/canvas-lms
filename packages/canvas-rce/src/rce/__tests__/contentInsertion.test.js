@@ -31,6 +31,7 @@ describe('contentInsertion', () => {
 
     editor = {
       content: '',
+      selectionContent: '',
       classes: '',
       isHidden: () => {
         return false
@@ -40,7 +41,11 @@ describe('contentInsertion', () => {
           return null
         },
         getContent: () => {
-          return ''
+          return editor.selectionContent
+        },
+        setContent: content => {
+          editor.selectionContent = content
+          editor.content = content
         },
         getEnd: () => {
           return node
@@ -107,6 +112,42 @@ describe('contentInsertion', () => {
       contentInsertion.insertLink(editor, link)
       expect(editor.content).toEqual(
         '<a href="/some/path" title="Here Be Links" class="instructure_file_link instructure_scribd_file">Click On Me</a>'
+      )
+    })
+
+    it('respects the current selection building the link by delegating to tinymce', () => {
+      editor.execCommand = jest.fn()
+      editor.selection.setContent('link me')
+      contentInsertion.insertLink(editor, link)
+      expect(editor.execCommand).toHaveBeenCalled()
+      expect(editor.execCommand.mock.calls[0][0]).toBe('mceInsertLink')
+    })
+
+    it('cleans a url with no protocol when linking the current selection', () => {
+      editor.execCommand = jest.fn()
+      editor.selection.setContent('link me')
+      link.href = 'www.google.com'
+      contentInsertion.insertLink(editor, link)
+      expect(editor.execCommand).toHaveBeenCalled()
+      expect(editor.execCommand.mock.calls[0][0]).toBe('mceInsertLink')
+      expect(editor.execCommand.mock.calls[0][2].href).toBe('http://www.google.com')
+    })
+
+    it('cleans a url with no protocol when editing an existing link', () => {
+      link.href = 'www.google.com'
+      editor.selection.setContent('link me')
+      const anchor = document.createElement('div')
+      anchor.setAttribute('href', 'http://example.com')
+      const textNode = document.createTextNode('edit me')
+      anchor.appendChild(textNode)
+      editor.selection.getNode = () => textNode
+      editor.dom.getParent = () => anchor
+      editor.selection.select = () => {}
+      editor.dom.setAttribs = jest.fn()
+      contentInsertion.insertLink(editor, link)
+      expect(editor.dom.setAttribs).toHaveBeenCalledWith(
+        anchor,
+        expect.objectContaining({href: 'http://www.google.com'})
       )
     })
 

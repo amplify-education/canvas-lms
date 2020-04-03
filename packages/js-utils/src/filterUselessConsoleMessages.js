@@ -26,13 +26,21 @@ const consoleMessagesToIgnore = {
     /Function components cannot be given refs\. Attempts to access this ref will fail[\s\S]*in (CanvasInstUIModal|PopoverTrigger)/
   ],
   warn: [
-    // /Please update the following components/, // Uncomment this if all the react 16.9 deprecations are cluttering up the console and you want to focus on something else
+    // Uncomment the following line if all the react 16.9 deprecations are cluttering up
+    // the console and you want to focus on something else
+    // /Please update the following components/,
+
+    // The build logs have grown to over 250MB so in an interest of being able to use
+    // the build logs at all we're filtering out these general messages.
+    /is deprecated and will be removed/,
 
     // '@instructure/ui-select' itself generates this warning, we assume they will figure it out themselves
     /is experimental and its API could change significantly in a future release/,
     'Warning: [Focusable] Exactly one focusable child is required (0 found).',
 
     /in Select \(created by CanvasSelect\)/,
+    'created by DateInput',
+    'created by Editable',
 
     // React 16.9+ generates these deprecation warnings but it doesn't do any good to hear about the ones for instUI. We can't do anything about them in this repo
     // Put any others we can't control here.
@@ -43,10 +51,10 @@ const consoleMessagesToIgnore = {
   ]
 }
 
-export function filterUselessConsoleMessages(orginalConsole = console) {
+export function filterUselessConsoleMessages(originalConsole = console) {
   Object.keys(consoleMessagesToIgnore).forEach(key => {
-    const original = orginalConsole[key]
-    orginalConsole[key] = function() {
+    const original = originalConsole[key]
+    originalConsole[key] = function() {
       const combinedMsg = Array.prototype.join.call(arguments)
       const shouldIgnore = pattern =>
         combinedMsg[typeof pattern === 'string' ? 'includes' : 'match'](pattern)

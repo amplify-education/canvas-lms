@@ -112,6 +112,14 @@ module RCENextPage
     fj("[aria-label='Course Documents'] [role='button']:contains('#{title}')")
   end
 
+  def course_document_links
+    ff("[data-testid='instructure_links-Link']")
+  end
+
+  def course_media_links
+    ff("[data-testid='instructure_links-Link']")
+  end
+
   def assignment_published_status
     # add selector
   end
@@ -164,7 +172,7 @@ module RCENextPage
   end
 
   def user_images
-    f('[role="menuitem"][title="My Images"]')
+    f('[role="menuitem"][title="User Images"]')
   end
 
   def upload_image_button
@@ -191,12 +199,24 @@ module RCENextPage
     f('[role="dialog"][aria-label="Upload Media"')
   end
 
+  def course_media
+    f('[role="menuitem"][title="Course Media"]')
+  end
+
+  def user_media
+    f('[role="menuitem"][title="User Media"]')
+  end
+
   def upload_document_button
     f('[role="menuitem"][title="Upload Document"]')
   end
 
   def course_documents
     f('[role="menuitem"][title="Course Documents"]')
+  end
+
+  def user_documents
+    f('[role="menuitem"][title="User Documents"]')
   end
 
   def upload_document_modal
@@ -288,15 +308,15 @@ module RCENextPage
   end
 
   def header_option
-    f('[role="menuitemcheckbox"][title="Header"]')
+    f('[role="menuitemcheckbox"][title="Heading 2"]')
   end
 
   def subheader_option
-    f('[role="menuitemcheckbox"][title=" Subheader"]')
+    f('[role="menuitemcheckbox"][title=" Heading 3"]')
   end
 
   def small_header_option
-    f('[role="menuitemcheckbox"][title=" Small header"]')
+    f('[role="menuitemcheckbox"][title=" Heading 4"]')
   end
 
   def preformatted_option
@@ -341,6 +361,14 @@ module RCENextPage
 
   def decorative_options_checkbox
     fxpath('//div/input[@type="checkbox"]/..')
+  end
+
+  def overflow_toolbar_selector
+    '.tox-toolbar__overflow'
+  end
+
+  def overflow_toolbar
+    f(overflow_toolbar_selector)
   end
 
   # ---------------------- Actions ----------------------
@@ -445,6 +473,21 @@ module RCENextPage
     wait_for_ajaximations
   end
 
+  def click_embed_media_tab
+    fj('[role="tab"]:contains("Embed")').click
+    wait_for_animations
+  end
+
+  def click_course_media
+    course_media.click
+    wait_for_ajaximations
+  end
+
+  def click_user_media
+    user_media.click
+    wait_for_ajaximations
+  end
+
   def click_upload_document
     upload_document_button.click
     wait_for_ajaximations
@@ -452,6 +495,11 @@ module RCENextPage
 
   def click_course_documents
     course_documents.click
+    wait_for_ajaximations
+  end
+
+  def click_user_documents
+    user_documents.click
     wait_for_ajaximations
   end
 
@@ -573,5 +621,37 @@ module RCENextPage
 
   def click_decorative_options_checkbox
     decorative_options_checkbox.click
+  end
+
+  def click_upload_media_submit_button
+    upload_media_submit_button.click
+  end
+
+  def user_media_menu_item
+    fj('[role="menuitem"]:contains("User Media")')
+  end
+
+  def menu_items_by_menu_id(menu_id)
+    ffj("##{menu_id} [role='menuitem']")
+  end
+
+  def menu_item_by_menu_id(menu_id, item_label)
+    fj("##{menu_id}:contains('#{item_label}')")
+  end
+
+  def embed_code_textarea
+    f('textarea[placeholder="Embed Code"]')
+  end
+
+  def upload_media_submit_button
+    f('[aria-label="Upload Media"] button[type="submit"]')
+  end
+
+  def switch_to_html_view
+    fj('button:contains("Switch to raw html editor")').click
+  end
+
+  def switch_to_editor_view
+    fj('button:contains("Switch to rich text editor")').click
   end
 end

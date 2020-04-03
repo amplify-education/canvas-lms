@@ -53,6 +53,7 @@ describe Course do
         },
         :outline_folders => {'1865116206002' => true, '1865116207002' => true},
         :quizzes => {'1865116175002' => true},
+        :all_course_outline => true,
         :all_groups => true,
         :shift_dates=>"1",
         :old_start_date=>"Jan 23, 2009",
@@ -279,17 +280,45 @@ describe Course do
       expect(migration.workflow_state).to eq('imported')
     end
 
-    it "runs DueDateCacher only twice" do
-      due_date_cacher = instance_double(DueDateCacher)
-      allow(DueDateCacher).to receive(:new).and_return(due_date_cacher)
-
-      # Once for course creation and once after the full import has completed
-      expect(due_date_cacher).to receive(:recompute).twice
-
+    it "runs DueDateCacher never if no assignments are imported" do
       params = {:copy => {"everything" => true}}
       migration = build_migration(@course, params)
+      @course.reload # seems to be holding onto saved_changes for some reason
+
+      expect(DueDateCacher).to receive(:recompute_course).never
       setup_import(@course, 'assessments.json', migration)
       expect(migration.workflow_state).to eq('imported')
+    end
+
+    it "runs DueDateCacher once if assignments with dates are imported" do
+      params = {:copy => {"everything" => true}}
+      migration = build_migration(@course, params)
+      @course.reload
+
+      expect(DueDateCacher).to receive(:recompute_course).once
+      json = File.open(File.join(IMPORT_JSON_DIR, 'assignment.json')).read
+      @data = {"assignments" => JSON.parse(json)}.with_indifferent_access
+      Importers::CourseContentImporter.import_content(
+        @course, @data, migration.migration_settings[:migration_ids_to_import], migration
+      )
+      expect(migration.workflow_state).to eq('imported')
+    end
+
+    it "automatically restores assignment groups for object assignment types (i.e. topics/quizzes)" do
+      params = {:copy => {"assignments" => {"gf455e2add230724ba190bb20c1491aa9" => true}}}
+      migration = build_migration(@course, params)
+      setup_import(@course, 'discussion_assignments.json', migration)
+      a1 = @course.assignments.where(:migration_id => "gf455e2add230724ba190bb20c1491aa9").take
+      a1.assignment_group.destroy!
+
+      # import again but just the discus
+      params = {:copy => {"discussion_topics" => {"g8bacee869e70bf19cd6784db3efade7e" => true}}}
+      migration = build_migration(@course, params)
+      setup_import(@course, 'discussion_assignments.json', migration)
+      dt = @course.discussion_topics.where(:migration_id => "g8bacee869e70bf19cd6784db3efade7e").take
+      expect(dt.assignment.assignment_group).to eq a1.assignment_group
+      expect(dt.assignment.assignment_group).to_not be_deleted
+      expect(a1.reload).to be_deleted # didn't restore the previously deleted assignment too
     end
 
     context "when it is a Quizzes.Next migration" do
@@ -491,8 +520,8 @@ describe Course do
       course_factory
       @module = @course.context_modules.create! name: 'test'
       @module.add_item(type: 'context_module_sub_header', title: 'blah')
-      @params = {"copy" => {"quizzes" => {"i7ed12d5eade40d9ee8ecb5300b8e02b2" => true}}}
-      json = File.open(File.join(IMPORT_JSON_DIR, 'assessments.json')).read
+      @params = {"copy" => {"assignments" => {"1865116198002" => true}}}
+      json = File.open(File.join(IMPORT_JSON_DIR, 'import_from_migration.json')).read
       @data = JSON.parse(json).with_indifferent_access
     end
 
@@ -503,7 +532,20 @@ describe Course do
       migration.save!
 
       Importers::CourseContentImporter.import_content(@course, @data, @params, migration)
-      expect(@module.content_tags.order('position').pluck(:content_type)).to eq(%w(ContextModuleSubHeader Quizzes::Quiz))
+      expect(@module.content_tags.order('position').pluck(:content_type)).to eq(%w(ContextModuleSubHeader Assignment))
+    end
+
+    it "can insert items from one module to an existing module" do
+      migration = @course.content_migrations.build
+      @params["copy"].merge!("context_modules" => {"1864019962002" => true})
+      migration.migration_settings[:migration_ids_to_import] = @params
+      migration.migration_settings[:insert_into_module_id] = @module.id
+      migration.save!
+
+      Importers::CourseContentImporter.import_content(@course, @data, @params, migration)
+      expect(migration.migration_issues.count).to eq 0
+      expect(@course.context_modules.where.not(:migration_id => nil).count).to eq 0 # doesn't import other modules
+      expect(@module.content_tags.last.content.migration_id).to eq '1865116198002'
     end
 
     it "inserts imported items into a module" do
@@ -514,7 +556,47 @@ describe Course do
       migration.save!
 
       Importers::CourseContentImporter.import_content(@course, @data, @params, migration)
-      expect(@module.content_tags.order('position').pluck(:content_type)).to eq(%w(Quizzes::Quiz ContextModuleSubHeader))
+      expect(@module.content_tags.order('position').pluck(:content_type)).to eq(%w(Assignment ContextModuleSubHeader))
+    end
+
+    it "respects insert_into_module_type" do
+      @params['copy']['discussion_topics'] = {'1864019689002' => true}
+      migration = @course.content_migrations.build
+      migration.migration_settings[:migration_ids_to_import] = @params
+      migration.migration_settings[:insert_into_module_id] = @module.id
+      migration.migration_settings[:insert_into_module_type] = 'assignment'
+      migration.save!
+      Importers::CourseContentImporter.import_content(@course, @data, @params, migration)
+      expect(@module.content_tags.order('position').pluck(:content_type)).to eq(%w(ContextModuleSubHeader Assignment))
+    end
+  end
+
+  describe "import_class_name" do
+    it "converts various forms of name to the proper AR class name" do
+      expect(Importers::CourseContentImporter.import_class_name('assignment')).to eq 'Assignment'
+      expect(Importers::CourseContentImporter.import_class_name('assignments')).to eq 'Assignment'
+      expect(Importers::CourseContentImporter.import_class_name('announcement')).to eq 'DiscussionTopic'
+      expect(Importers::CourseContentImporter.import_class_name('announcements')).to eq 'DiscussionTopic'
+      expect(Importers::CourseContentImporter.import_class_name('discussion_topic')).to eq 'DiscussionTopic'
+      expect(Importers::CourseContentImporter.import_class_name('discussion_topics')).to eq 'DiscussionTopic'
+      expect(Importers::CourseContentImporter.import_class_name('attachment')).to eq 'Attachment'
+      expect(Importers::CourseContentImporter.import_class_name('attachments')).to eq 'Attachment'
+      expect(Importers::CourseContentImporter.import_class_name('file')).to eq 'Attachment'
+      expect(Importers::CourseContentImporter.import_class_name('files')).to eq 'Attachment'
+      expect(Importers::CourseContentImporter.import_class_name('page')).to eq 'WikiPage'
+      expect(Importers::CourseContentImporter.import_class_name('pages')).to eq 'WikiPage'
+      expect(Importers::CourseContentImporter.import_class_name('wiki_page')).to eq 'WikiPage'
+      expect(Importers::CourseContentImporter.import_class_name('wiki_pages')).to eq 'WikiPage'
+      expect(Importers::CourseContentImporter.import_class_name('quiz')).to eq 'Quizzes::Quiz'
+      expect(Importers::CourseContentImporter.import_class_name('quizzes')).to eq 'Quizzes::Quiz'
+      expect(Importers::CourseContentImporter.import_class_name('module')).to eq 'ContextModule'
+      expect(Importers::CourseContentImporter.import_class_name('modules')).to eq 'ContextModule'
+      expect(Importers::CourseContentImporter.import_class_name('context_module')).to eq 'ContextModule'
+      expect(Importers::CourseContentImporter.import_class_name('context_modules')).to eq 'ContextModule'
+      expect(Importers::CourseContentImporter.import_class_name('module_item')).to eq 'ContentTag'
+      expect(Importers::CourseContentImporter.import_class_name('module_items')).to eq 'ContentTag'
+      expect(Importers::CourseContentImporter.import_class_name('content_tag')).to eq 'ContentTag'
+      expect(Importers::CourseContentImporter.import_class_name('content_tags')).to eq 'ContentTag'
     end
   end
 

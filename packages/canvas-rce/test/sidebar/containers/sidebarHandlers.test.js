@@ -27,6 +27,7 @@ import * as flickr from '../../../src/sidebar/actions/flickr'
 import * as files from '../../../src/sidebar/actions/files'
 import * as documents from '../../../src/sidebar/actions/documents'
 import * as context from '../../../src/sidebar/actions/context'
+import * as media from '../../../src/sidebar/actions/media'
 
 describe('sidebarHandlers', () => {
   let handlers, dispatch
@@ -70,11 +71,17 @@ describe('sidebarHandlers', () => {
   })
 
   it('ties images fetch initial images to store', () => {
-    testHandler('fetchInitialImages', images, 'fetchInitialImages')
+    testHandler('fetchInitialImages', images, 'fetchInitialImages', {
+      sort: 'alphabetical',
+      order: 'asc'
+    })
   })
 
   it('ties images fetch next images to store', () => {
-    testHandler('fetchNextImages', images, 'fetchNextImages')
+    testHandler('fetchNextImages', images, 'fetchNextImages', {
+      sort: 'alphabetical',
+      order: 'asc'
+    })
   })
 
   it('ties upload preflight to store', () => {
@@ -100,14 +107,41 @@ describe('sidebarHandlers', () => {
   })
 
   it('ties documents fetch initial documents to store', () => {
-    testHandler('fetchInitialDocs', documents, 'fetchInitialDocs')
+    testHandler('fetchInitialDocs', documents, 'fetchInitialDocs', {
+      sort: 'alphabetical',
+      order: 'asc'
+    })
   })
 
-  it('ties documents fetch nest documents to store', () => {
-    testHandler('fetchNextDocs', documents, 'fetchNextDocs')
+  it('ties documents fetch next documents to store', () => {
+    testHandler('fetchNextDocs', documents, 'fetchNextDocs', {
+      sort: 'alphabetical',
+      order: 'asc'
+    })
   })
 
   it('ties context change context to store', () => {
     testHandler('onChangeContext', context, 'changeContext', 'newContext')
+  })
+
+  it('ties media fetch initial media to store', () => {
+    testHandler('fetchInitialMedia', media, 'fetchInitialMedia', {
+      sort: 'alphabetical',
+      order: 'asc'
+    })
+  })
+
+  it('ties media fetch next media to store', () => {
+    testHandler('fetchNextMedia', media, 'fetchNextMedia', {
+      sort: 'alphabetical',
+      order: 'asc'
+    })
+  })
+
+  it('ties media update media object to store', () => {
+    testHandler('updateMediaObject', media, 'updateMediaObject', {
+      media_object_id: 'm-foo',
+      title: 'new title'
+    })
   })
 })

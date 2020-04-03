@@ -71,7 +71,7 @@ export default function useFetchApi({
   params = {}, // url parameters
   headers = {}, // additional request headers
 
-  // Setting fetchAllpages makes useFetchApi continually fetch pages while the Link header indicates
+  // Setting fetchAllPages makes useFetchApi continually fetch pages while the Link header indicates
   // there is a next page. The success callback will be invoked for each page with a flattened array
   // of the results accumulated thus far. The meta callback will also be called once for each page.
   // If an error occurs on any page, the error callback will be called and pagination will stop. The
@@ -84,7 +84,7 @@ export default function useFetchApi({
   // useImmediate for deep comparisons and may help avoid browser flickering
   useImmediate(
     () => {
-      if (forceResult !== undefined) {
+      if (typeof forceResult !== 'undefined') {
         success(forceResult)
         return
       }

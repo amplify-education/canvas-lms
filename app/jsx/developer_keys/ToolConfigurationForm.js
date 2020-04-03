@@ -20,8 +20,12 @@ import PropTypes from 'prop-types'
 import React from 'react'
 
 import {Heading} from '@instructure/ui-elements'
-import {Select, TextArea, TextInput} from '@instructure/ui-forms'
-import {View} from '@instructure/ui-layout'
+// If we want to upgrade this Select to the new Inst UI Select in ui-select,
+// which is not backwards-compatible, we can use CanvasSelect.
+import {Select} from '@instructure/ui-forms'
+import {TextArea} from '@instructure/ui-text-area'
+import {TextInput} from '@instructure/ui-text-input'
+import {View, Grid} from '@instructure/ui-layout'
 
 import ManualConfigurationForm from './ManualConfigurationForm'
 
@@ -68,13 +72,14 @@ export default class ToolConfigurationForm extends React.Component {
   }
 
   handleConfigTypeChange = (e, option) => {
-    this.props.dispatch(this.props.setLtiConfigurationMethod(option.value))
+    this.props.updateConfigurationMethod(option.value)
   }
 
   setManualConfigRef = node => (this.manualConfigRef = node)
 
   configurationInput() {
-    if (this.props.configurationMethod === 'json') {
+    const {configurationMethod} = this.props
+    if (configurationMethod === 'json') {
       return (
         <TextArea
           name="tool_configuration"
@@ -89,7 +94,7 @@ export default class ToolConfigurationForm extends React.Component {
           }
         />
       )
-    } else if (this.props.configurationMethod === 'manual') {
+    } else if (configurationMethod === 'manual') {
       return (
         <ManualConfigurationForm
           ref={this.setManualConfigRef}
@@ -126,7 +131,7 @@ export default class ToolConfigurationForm extends React.Component {
     ].filter(o => !!o)
   }
 
-  render() {
+  renderBody() {
     return (
       <View>
         <Heading level="h2" as="h2" margin="0 0 x-small">
@@ -144,22 +149,25 @@ export default class ToolConfigurationForm extends React.Component {
       </View>
     )
   }
+
+  render() {
+    return (
+      <Grid.Row>
+        <Grid.Col>{this.renderBody()}</Grid.Col>
+      </Grid.Row>
+    )
+  }
 }
 
 ToolConfigurationForm.propTypes = {
-  dispatch: PropTypes.func.isRequired,
   toolConfiguration: PropTypes.object.isRequired,
   toolConfigurationUrl: PropTypes.string.isRequired,
   validScopes: PropTypes.object.isRequired,
   validPlacements: PropTypes.arrayOf(PropTypes.string).isRequired,
-  setLtiConfigurationMethod: PropTypes.func.isRequired,
-  configurationMethod: PropTypes.string,
   editing: PropTypes.bool.isRequired,
   showRequiredMessages: PropTypes.bool.isRequired,
   updateToolConfiguration: PropTypes.func.isRequired,
-  updateToolConfigurationUrl: PropTypes.func.isRequired
-}
-
-ToolConfigurationForm.defaultProps = {
-  configurationMethod: 'json'
+  updateToolConfigurationUrl: PropTypes.func.isRequired,
+  configurationMethod: PropTypes.string.isRequired,
+  updateConfigurationMethod: PropTypes.func.isRequired
 }

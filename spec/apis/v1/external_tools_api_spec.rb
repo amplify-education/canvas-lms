@@ -190,7 +190,7 @@ describe ExternalToolsController, type: :request do
           end
 
           it "returns sessionless launch URL when default URL is not set and placement URL is" do
-            tool.update_attributes!(url: nil)
+            tool.update!(url: nil)
             params = { id: tool.id.to_s, launch_type: 'course_navigation' }
             json = get_sessionless_launch_url(@course, 'course', params)
             expect(json).to include('url')
@@ -542,10 +542,17 @@ describe ExternalToolsController, type: :request do
     et.course_settings_sub_navigation = {:url=>"http://www.example.com/ims/lti/resource", :text => "course settings sub navigation", display_type: 'full_width', visibility: 'admins'}
     et.global_navigation = {:url=>"http://www.example.com/ims/lti/resource", :text => "global navigation", display_type: 'full_width', visibility: 'admins'}
     et.assignment_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "assignment menu", display_type: 'full_width', visibility: 'admins'}
+    et.assignment_index_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "assignment index menu", display_type: 'full_width', visibility: 'admins'}
+    et.assignment_group_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "assignment group menu", display_type: 'full_width', visibility: 'admins'}
     et.discussion_topic_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "discussion topic menu", display_type: 'full_width', visibility: 'admins'}
-    et.file_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "module menu", display_type: 'full_width', visibility: 'admins'}
+    et.discussion_topic_index_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "discussion topic index menu", display_type: 'full_width', visibility: 'admins'}
+    et.file_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "file menu", display_type: 'full_width', visibility: 'admins'}
+    et.file_index_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "file index menu", display_type: 'full_width', visibility: 'admins'}
     et.module_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "module menu", display_type: 'full_width', visibility: 'admins'}
+    et.module_index_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "modules index menu", display_type: 'full_width', visibility: 'admins'}
+    et.module_group_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "modules group menu", display_type: 'full_width', visibility: 'admins'}
     et.quiz_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "quiz menu", display_type: 'full_width', visibility: 'admins'}
+    et.quiz_index_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "quiz index menu", display_type: 'full_width', visibility: 'admins'}
     et.wiki_page_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "wiki page menu", display_type: 'full_width', visibility: 'admins'}
     et.wiki_index_menu = {:url=>"http://www.example.com/ims/lti/resource", :text => "wiki index menu", display_type: 'full_width', visibility: 'admins'}
     et.student_context_card = {:url=>"http://www.example.com/ims/lti/resource", :text => "context card link", display_type: 'full_width', visibility: 'admins'}
@@ -698,6 +705,22 @@ describe ExternalToolsController, type: :request do
           "display_type"=>'full_width',
           "selection_height"=>400,
           "selection_width"=>800},
+      "assignment_index_menu"=>
+        {"text"=>"assignment index menu",
+          "label"=>"assignment index menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
+      "assignment_group_menu"=>
+        {"text"=>"assignment group menu",
+          "label"=>"assignment group menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
      "discussion_topic_menu"=>
          {"text"=>"discussion topic menu",
           "label"=>"discussion topic menu",
@@ -706,9 +729,25 @@ describe ExternalToolsController, type: :request do
           "display_type"=>'full_width',
           "selection_height"=>400,
           "selection_width"=>800},
+      "discussion_topic_index_menu"=>
+        {"text"=>"discussion topic index menu",
+          "label"=>"discussion topic index menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
      "file_menu"=>
-         {"text"=>"module menu",
-          "label"=>"module menu",
+         {"text"=>"file menu",
+          "label"=>"file menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
+      "file_index_menu"=>
+        {"text"=>"file index menu",
+          "label"=>"file index menu",
           "url"=>"http://www.example.com/ims/lti/resource",
           "visibility"=>'admins',
           "display_type"=>'full_width',
@@ -722,9 +761,33 @@ describe ExternalToolsController, type: :request do
           "display_type"=>'full_width',
           "selection_height"=>400,
           "selection_width"=>800},
+    "module_index_menu"=>
+        {"text"=>"modules index menu",
+          "label"=>"modules index menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
+    "module_group_menu"=>
+        {"text"=>"modules group menu",
+          "label"=>"modules group menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
      "quiz_menu"=>
-         {"text"=>"quiz menu",
+        {"text"=>"quiz menu",
           "label"=>"quiz menu",
+          "url"=>"http://www.example.com/ims/lti/resource",
+          "visibility"=>'admins',
+          "display_type"=>'full_width',
+          "selection_height"=>400,
+          "selection_width"=>800},
+    "quiz_index_menu"=>
+        {"text"=>"quiz index menu",
+          "label"=>"quiz index menu",
           "url"=>"http://www.example.com/ims/lti/resource",
           "visibility"=>'admins',
           "display_type"=>'full_width',

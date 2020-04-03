@@ -537,10 +537,10 @@ describe Account do
 
     limited_access = [ :read, :read_as_admin, :manage, :update, :delete, :read_outcomes, :read_terms ]
     conditional_access = RoleOverride.permissions.select { |_, v| v[:account_allows] }.map(&:first)
+    disabled_by_default = RoleOverride.permissions.select { |_, v| v[:true_for].empty? }.map(&:first)
     full_access = RoleOverride.permissions.keys +
-                  limited_access - conditional_access +
-                  [:create_courses] +
-                  [:create_tool_manually]
+                  limited_access - disabled_by_default - conditional_access +
+                  [:create_courses, :create_tool_manually]
 
     full_root_access = full_access - RoleOverride.permissions.select { |k, v| v[:account_only] == :site_admin }.map(&:first)
     full_sub_access = full_root_access - RoleOverride.permissions.select { |k, v| v[:account_only] == :root }.map(&:first)
@@ -932,12 +932,57 @@ describe Account do
       tabs = @account.tabs_available(@admin)
       expect(tabs.map{|t| t[:id] }).to be_include(Account::TAB_QUESTION_BANKS)
     end
+
+    describe "'ePortfolio Moderation' tab" do
+      let(:tab_ids) { @account.tabs_available(@admin).pluck(:id) }
+
+      it "is shown if the release flag is enabled and the user has the moderate_user_content permission" do
+        account_admin_user_with_role_changes(acccount: @account, role_changes: { moderate_user_content: true })
+        @account.root_account.enable_feature!(:eportfolio_moderation)
+
+        expect(tab_ids).to include(Account::TAB_EPORTFOLIO_MODERATION)
+      end
+
+      it "is not shown if the user has permission but the release flag is not enabled" do
+        account_admin_user_with_role_changes(acccount: @account, role_changes: { moderate_user_content: true })
+
+        expect(tab_ids).not_to include(Account::TAB_EPORTFOLIO_MODERATION)
+      end
+
+      it "is not shown if the release flag is enabled but the user lacks permission" do
+        account_admin_user_with_role_changes(acccount: @account, role_changes: { moderate_user_content: false })
+        @account.root_account.enable_feature!(:eportfolio_moderation)
+
+        expect(tab_ids).not_to include(Account::TAB_EPORTFOLIO_MODERATION)
+      end
+    end
+
+    describe "decouple_rubrics feature flag" do
+      let(:tab_ids) { @account.tabs_available(@admin).pluck(:id) }
+
+      it "does not return the rubrics tab if manage_outcomes is false with the FF off" do
+        account_admin_user_with_role_changes(acccount: @account, role_changes: { manage_outcomes: false })
+        expect(tab_ids).not_to include(Account::TAB_RUBRICS)
+      end
+
+      it "returns rubrics tab if the FF is enabled/manage_outcomes is disabled" do
+        account_admin_user_with_role_changes(acccount: @account, role_changes: { manage_outcomes: false })
+        @account.root_account.enable_feature!(:decouple_rubrics)
+        expect(tab_ids).to include(Account::TAB_RUBRICS)
+      end
+
+      it "the rubrics tab is not shown if the FF is enabled but the user lacks permission (manage_rubrics)" do
+        account_admin_user_with_role_changes(acccount: @account, role_changes: { manage_rubrics: false })
+        @account.root_account.enable_feature!(:decouple_rubrics)
+        expect(tab_ids).not_to include(Account::TAB_RUBRICS)
+      end
+    end
   end
 
   describe "fast_all_users" do
     it "should preserve sortable_name" do
       user_with_pseudonym(:active_all => 1)
-      @user.update_attributes(:name => "John St. Clair", :sortable_name => "St. Clair, John")
+      @user.update(:name => "John St. Clair", :sortable_name => "St. Clair, John")
       @johnstclair = @user
       user_with_pseudonym(:active_all => 1, :username => 'jt@instructure.com', :name => 'JT Olds')
       @jtolds = @user
@@ -1803,6 +1848,58 @@ describe Account do
         account2.update_attribute(:parent_account, account1)
         expect(Account.account_chain_ids(account2.id)).to eq [account2.id, account1.id, Account.default.id]
       end
+    end
+  end
+
+  context '#destroy on sub accounts' do
+    before :once do
+      @root_account = Account.create!
+      @sub_account = @root_account.sub_accounts.create!
+    end
+
+    it 'wont let you destroy if there are active sub accounts' do
+      @sub_account.sub_accounts.create!
+      expect { @sub_account.destroy! }.to raise_error ActiveRecord::RecordInvalid
+    end
+
+    it 'wont let you destroy if there are active courses' do
+      @sub_account.courses.create!
+      expect { @sub_account.destroy! }.to raise_error ActiveRecord::RecordInvalid
+    end
+
+    it 'destroys associated account users' do
+      account_user1 = @sub_account.account_users.create!(user: User.create!)
+      account_user2 = @sub_account.account_users.create!(user: User.create!)
+      @sub_account.destroy!
+      expect(account_user1.reload.workflow_state).to eq 'deleted'
+      expect(account_user2.reload.workflow_state).to eq 'deleted'
+    end
+  end
+
+  context 'custom help link validation' do
+    before do
+      account_model
+    end
+
+    it 'should be valid if custom help links are not present' do
+      @account.settings[:foo] = 'bar'
+      expect(@account.valid?).to be true
+    end
+
+    it 'should be valid if custom help links are valid' do
+      @account.settings[:custom_help_links] = [{ is_new: true, is_featured: false }, { is_new: false, is_featured: true }]
+      expect(@account.valid?).to be true
+    end
+
+    it 'should not be valid if custom help links are invalid' do
+      @account.settings[:custom_help_links] = [{ is_new: true, is_featured: true }]
+      expect(@account.valid?).to be false
+    end
+
+    it 'should not check custom help links if not changed' do
+      @account.update_attribute(:settings, [{ is_new: true, is_featured: true }]) # skips validation
+      @account.name = 'foo'
+      expect(@account.valid?).to be true
     end
   end
 end

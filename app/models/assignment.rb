@@ -57,7 +57,7 @@ class Assignment < ActiveRecord::Base
     anonymous_instructor_annotations
   ].freeze
 
-  attr_accessor :previous_id, :copying, :user_submitted, :grade_posting_in_progress
+  attr_accessor :previous_id, :copying, :user_submitted, :grade_posting_in_progress, :unposted_anonymous_submissions
   attr_reader :assignment_changed, :posting_params_for_notifications
   attr_writer :updating_user
 
@@ -106,6 +106,16 @@ class Assignment < ActiveRecord::Base
   scope :anonymous, -> { where(anonymous_grading: true) }
   scope :moderated, -> { where(moderated_grading: true) }
   scope :auditable, -> { anonymous.or(moderated) }
+  scope :type_quiz_lti, -> {
+    joins(:external_tool_tag).
+      joins(<<-SQL).
+        INNER JOIN #{ContextExternalTool.quoted_table_name}
+        ON content_tags.content_type='ContextExternalTool'
+        AND context_external_tools.id = content_tags.content_id
+      SQL
+      merge(ContextExternalTool.quiz_lti).
+      distinct
+  }
 
   validates_associated :external_tool_tag, :if => :external_tool?
   validate :group_category_changes_ok?
@@ -623,6 +633,7 @@ class Assignment < ActiveRecord::Base
     run_at = @next_auto_peer_review_date || next_auto_peer_review_date
     return if run_at.blank?
 
+    run_at = 1.minute.from_now if run_at < 1.minute.from_now # delay immediate run in case associated objects are still being saved
     self.send_later_enqueue_args(:do_auto_peer_review, {
       :run_at => run_at,
       :on_conflict => :overwrite,
@@ -873,6 +884,7 @@ class Assignment < ActiveRecord::Base
     self.title ||= (self.assignment_group.default_assignment_name rescue nil) || "Assignment"
 
     self.infer_all_day
+    self.position = self.position_was if self.will_save_change_to_position? && self.position.nil? # don't allow setting to nil
 
     if !self.assignment_group || (self.assignment_group.deleted? && !self.deleted?)
       ensure_assignment_group(false)
@@ -892,13 +904,11 @@ class Assignment < ActiveRecord::Base
   protected :default_values
 
   def ensure_assignment_group(do_save = true)
+    return if assignment_group_id
     self.context.require_assignment_group
-    assignment_groups = self.context.assignment_groups.active
-    if !assignment_groups.map(&:id).include?(self.assignment_group_id)
-      self.assignment_group = assignment_groups.first
-      Shackles.activate(:master) do
-        save! if do_save
-      end
+    self.assignment_group = self.context.assignment_groups.active.first
+    if do_save
+      Shackles.activate(:master) { save! }
     end
   end
 
@@ -1072,6 +1082,10 @@ class Assignment < ActiveRecord::Base
     remove_assignment_updated_flag
   end
 
+  def course_broadcast_data
+    context&.broadcast_data
+  end
+
   set_broadcast_policy do |p|
     p.dispatch :assignment_due_date_changed
     p.to { |assignment|
@@ -1084,6 +1098,7 @@ class Assignment < ActiveRecord::Base
       BroadcastPolicies::AssignmentPolicy.new(assignment).
         should_dispatch_assignment_due_date_changed?
     }
+    p.data { course_broadcast_data }
 
     p.dispatch :assignment_changed
     p.to { |assignment|
@@ -1093,6 +1108,7 @@ class Assignment < ActiveRecord::Base
       BroadcastPolicies::AssignmentPolicy.new(assignment).
         should_dispatch_assignment_changed?
     }
+    p.data { course_broadcast_data }
 
     p.dispatch :assignment_created
     p.to { |assignment|
@@ -1102,28 +1118,26 @@ class Assignment < ActiveRecord::Base
       BroadcastPolicies::AssignmentPolicy.new(assignment).
         should_dispatch_assignment_created?
     }
+    p.data { course_broadcast_data }
     p.filter_asset_by_recipient { |assignment, user|
       assignment.overridden_for(user, skip_clone: true)
-    }
-
-    p.dispatch :assignment_unmuted
-    p.to { |assignment|
-      BroadcastPolicies::AssignmentParticipants.new(assignment).to
-    }
-    p.whenever { |assignment|
-      BroadcastPolicies::AssignmentPolicy.new(assignment).
-        should_dispatch_assignment_unmuted?
     }
 
     p.dispatch :submissions_posted
     p.to { |assignment|
       assignment.course.participating_instructors
     }
-    p.data(&:posting_params_for_notifications)
     p.whenever { |assignment|
       BroadcastPolicies::AssignmentPolicy.new(assignment).
         should_dispatch_submissions_posted?
     }
+    p.data do |record|
+      if record.posting_params_for_notifications.present?
+        record.posting_params_for_notifications.merge(course_broadcast_data)
+      else
+        course_broadcast_data
+      end
+    end
   end
 
   def notify_of_update=(val)
@@ -1430,6 +1444,23 @@ class Assignment < ActiveRecord::Base
     ])
   end
 
+  def self.preload_unposted_anonymous_submissions(assignments)
+    assignment_ids_with_unposted_anonymous_submissions = Assignment.
+      where(id: assignments, anonymous_grading: true).
+      where(
+        "EXISTS (?)", Submission.active.unposted.joins(user: :enrollments).
+          where("submissions.user_id = users.id").
+          where("submissions.assignment_id = assignments.id").
+          where("enrollments.course_id = assignments.context_id").
+          where(Enrollment.active_student_conditions)
+      ).
+      pluck(:id).to_set
+
+    assignments.each do |assignment|
+      assignment.unposted_anonymous_submissions = assignment_ids_with_unposted_anonymous_submissions.include?(assignment.id)
+    end
+  end
+
   def touch_on_unlock_if_necessary
     if self.unlock_at && Time.zone.now < self.unlock_at && (Time.zone.now + 1.hour) > self.unlock_at
       Shackles.activate(:master) do
@@ -1445,6 +1476,9 @@ class Assignment < ActiveRecord::Base
   def touch_assignment_and_submittable
     self.touch
     self.submittable_object&.touch
+    if self.submittable_object.is_a?(DiscussionTopic) && self.submittable_object.root_topic?
+      self.submittable_object.child_topics.touch_all
+    end
   end
 
   def low_level_locked_for?(user, opts={})
@@ -1628,31 +1662,6 @@ class Assignment < ActiveRecord::Base
     end
 
     users.uniq
-  end
-
-  def set_default_grade(options={})
-    score = self.grade_to_score(options[:default_grade])
-    grade = self.score_to_grade(score)
-    submissions_to_save = []
-    self.context.students.find_in_batches do |students|
-      submissions = find_or_create_submissions(students)
-      submissions_to_save.concat(submissions.select  { !submissions.score || (options[:overwrite_existing_grades] && submissions.score != score) })
-    end
-
-    Submission.active.where(id: submissions_to_save).update_all({
-      :score => score,
-      :grade => grade,
-      :published_score => score,
-      :published_grade => grade,
-      :workflow_state => 'graded',
-      :graded_at => Time.zone.now.utc
-    }) unless submissions_to_save.empty?
-
-    Rails.logger.debug "GRADES: recalculating because assignment #{global_id} had default grade set (#{options.inspect})"
-    self.context.recompute_student_scores
-    student_ids = context.student_ids
-    User.clear_cache_keys(student_ids, :submissions)
-    send_later_if_production(:multiple_module_actions, student_ids, :scored, score)
   end
 
   def title_with_id
@@ -2281,13 +2290,7 @@ class Assignment < ActiveRecord::Base
     scope.to_a.sort_by{|a| [a.assessment_type == 'grading' ? CanvasSort::First : CanvasSort::Last, Canvas::ICU.collation_key(a.assessor_name)] }
   end
 
-  # Takes a zipped file full of assignment comments/annotated assignments
-  # and generates comments on each assignment's submission.  Quietly
-  # ignore (for now) files that don't make sense to us.  The convention
-  # for file naming (how we're sending it down to the teacher) is
-  # last_name_first_name_user_id_attachment_id.
-  # extension
-  def generate_comments_from_files(filename, commenter)
+  def generate_comments_from_files_legacy(filename, commenter)
     zip_extractor = ZipExtractor.new(filename)
     # Creates a list of hashes, each one with a :user, :filename, and :submission entry.
     @ignored_files = []
@@ -2300,16 +2303,92 @@ class Assignment < ActiveRecord::Base
       comment = {
         comment: t(:comment_from_files, {one: "See attached file", other: "See attached files"}, count: files.size),
         author: commenter,
-        hidden: muted?,
         attachments: attachments,
       }
       group, students = group_students(user)
       comment[:group_comment_id] = CanvasSlug.generate_securish_uuid if group
       find_or_create_submissions(students).map do |submission|
-        submission.add_comment(comment)
+        submission.add_comment(comment.merge(hidden: submission.hide_grade_from_student?))
       end
     end
     [comments.compact, @ignored_files]
+  end
+
+  # Takes a zipped file full of assignment comments/annotated assignments
+  # and generates comments on each assignment's submission.  Quietly
+  # ignore (for now) files that don't make sense to us.  The convention
+  # for file naming (how we're sending it down to the teacher) is
+  # last_name_first_name_user_id_attachment_id.
+  # extension
+  def generate_comments_from_files_later(attachment_data, user)
+    progress = Progress.create!(context: self, tag: "submissions_reupload") do |p|
+      p.user = user
+    end
+
+    attachment = user.attachments.create!(attachment_data)
+    progress.process_job(self, :generate_comments_from_files, {}, attachment, user, progress)
+    progress
+  end
+
+  def generate_comments_from_files(_, attachment, commenter, progress)
+    file = attachment.open(need_local_file: true)
+    zip_extractor = ZipExtractor.new(file.path)
+    # Creates a list of hashes, each one with a :user, :filename, and :submission entry.
+    @ignored_files = []
+    file_map = zip_extractor.unzip_files.map { |f| infer_comment_context_from_filename(f) }.compact
+    files_for_user = file_map.group_by { |f| f[:user] }
+
+    comments = []
+
+    files_for_user.each do |user, files|
+      attachments = files.map do |g|
+        FileInContext.attach(self, g[:filename], g[:display_name])
+      end
+
+      comment_attr = {
+        comment: t(:comment_from_files, {one: "See attached file", other: "See attached files"}, count: files.size),
+        author: commenter,
+        attachments: attachments,
+      }
+
+      group, students = group_students(user)
+      comment_attr[:group_comment_id] = CanvasSlug.generate_securish_uuid if group
+
+      find_or_create_submissions(students).each do |submission|
+        hidden = submission.hide_grade_from_student?
+        comments.push(submission.add_comment(comment_attr.merge(hidden: hidden)))
+      end
+    end
+
+    results = {comments: [], ignored_files: @ignored_files}
+
+    comments.each do |comment|
+      attachments = comment.attachments.map do |comment_attachment|
+        {
+          display_name: comment_attachment.display_name,
+          filename: comment_attachment.filename,
+          id: comment_attachment.id
+        }
+      end
+
+      submission = {
+        user_id: comment.submission.user_id,
+        user_name: comment.submission.user.name
+      }
+
+      results[:comments].push({
+        attachments: attachments,
+        id: comment.id,
+        submission: submission
+      })
+    end
+
+    progress.set_results(results)
+    attachment.destroy!
+  end
+
+  def submission_reupload_progress
+    Progress.where(context_type: "Assignment", context_id: self, tag: "submissions_reupload").last
   end
 
   def group_category_name
@@ -2669,6 +2748,14 @@ class Assignment < ActiveRecord::Base
     )
   }
 
+  scope :quiz_lti, -> {
+    where(:submission_types => "external_tool").joins(:external_tool_tag).
+      where(:content_tags => {:content_type => "ContextExternalTool"}).
+      where("EXISTS (?)", ContextExternalTool.quiz_lti.
+        where("context_external_tools.id=content_tags.content_id").select(:id)
+      )
+  }
+
   def overdue?
     due_at && due_at <= Time.zone.now
   end
@@ -2854,9 +2941,19 @@ class Assignment < ActiveRecord::Base
     end
   end
 
+  # Suspend callbacks that recalculate grading period grades
+  def self.suspend_grading_period_grade_recalculation
+    Assignment.suspend_callbacks(:update_grading_period_grades) do
+      AssignmentOverride.suspend_callbacks(:update_grading_period_grades) do
+        yield
+      end
+    end
+  end
+
   def update_cached_due_dates
     return unless update_cached_due_dates?
     self.clear_cache_key(:availability)
+    self.quiz.clear_cache_key(:availability) if self.quiz?
 
     unless self.saved_by == :migration
       relevant_changes = saved_changes.slice(:due_at, :workflow_state, :only_visible_to_overrides).inspect
@@ -3047,6 +3144,7 @@ class Assignment < ActiveRecord::Base
   def run_if_overrides_changed_later!(student_ids: nil, updating_user: nil)
     return if self.class.suspended_callback?(:update_cached_due_dates, :save)
     self.clear_cache_key(:availability)
+    self.quiz.clear_cache_key(:availability) if self.quiz?
 
     enqueuing_args = if student_ids
       { strand: "assignment_overrides_changed_for_students_#{self.global_id}" }
@@ -3165,14 +3263,27 @@ class Assignment < ActiveRecord::Base
     end
   end
 
+  # If you're going to be checking this for multiple assignments, you may want
+  # to call .preload_unposted_anonymous_submissions on the lot of them first
   def anonymize_students?
     return false unless anonymous_grading?
 
     # Only anonymize students for moderated assignments if grades have not been published.
-    # Only anonymize students for non-moderated assignments if the assignment is muted.
-    moderated_grading? ? !grades_published? : muted?
+    return !grades_published? if moderated_grading?
+
+    # If Post Policies isn't enabled, we can just check whether the assignment is muted.
+    return muted? unless course.post_policies_enabled?
+
+    # Otherwise, only anonymize students if there's at least one active student with
+    # an unposted submission.
+    unposted_anonymous_submissions?
   end
   alias anonymize_students anonymize_students?
+
+  def unposted_anonymous_submissions?
+    Assignment.preload_unposted_anonymous_submissions([self]) unless defined? @unposted_anonymous_submissions
+    @unposted_anonymous_submissions
+  end
 
   def can_view_student_names?(user)
     return false if anonymize_students?
@@ -3264,7 +3375,6 @@ class Assignment < ActiveRecord::Base
 
       previously_unposted_submissions.each do |submission|
         submission.grade_posting_in_progress = true
-        # Need to broadcast assignment_unmuted here.
         submission.broadcast_notifications
         submission.grade_posting_in_progress = false
       end

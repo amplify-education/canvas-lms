@@ -77,7 +77,7 @@
 #         },
 #         "sis_group_category_id": {
 #           "description": "The SIS identifier for the group category. This field is only included if the user has permission to manage or view SIS information.",
-#           "type": "String"
+#           "type": "string"
 #         },
 #         "sis_import_id": {
 #           "description": "The unique identifier for the SIS import. This field is only included if the user has permission to manage SIS information.",
@@ -114,7 +114,7 @@ class GroupCategoriesController < ApplicationController
   #
   # @returns [GroupCategory]
   def index
-    @categories = @context.group_categories.preload(:root_account)
+    @categories = @context.group_categories.preload(:root_account, :progresses)
     respond_to do |format|
       format.json do
         if authorized_action(@context, @current_user, :manage_groups)

@@ -27,6 +27,12 @@ describe('RCE "Videos" Plugin > VideoOptionsTray', () => {
   let tray
 
   beforeEach(() => {
+    window.ENV = {
+      FEATURES: {
+        cc_in_rce_video_tray: true
+      }
+    }
+
     props = {
       onRequestClose: jest.fn(),
       onSave: jest.fn(),
@@ -42,6 +48,10 @@ describe('RCE "Videos" Plugin > VideoOptionsTray', () => {
         titleText: '',
         type: 'video-embed',
         videoSize: 'medium'
+      },
+      trayOptions: {
+        host: 'localhost:3001',
+        jwt: 'someuglyvalue'
       }
     }
   })
@@ -79,12 +89,6 @@ describe('RCE "Videos" Plugin > VideoOptionsTray', () => {
       props.videoOptions.titleText = ''
       renderComponent()
       expect(tray.titleText).toEqual('')
-    })
-
-    it('is disabled when displaying the image as a link', () => {
-      renderComponent()
-      tray.setDisplayAs('link')
-      expect(tray.titleTextDisabled).toEqual(true)
     })
   })
 
@@ -131,6 +135,19 @@ describe('RCE "Videos" Plugin > VideoOptionsTray', () => {
       renderComponent()
       await tray.setSize('Custom')
       expect(tray.size).toEqual('Custom')
+    })
+  })
+
+  describe('"Closed Captions Panel"', () => {
+    it('is displayed when feature flag is true', () => {
+      renderComponent()
+      expect(tray.$closedCaptionPanel).toBeInTheDocument()
+    })
+
+    it('is not displayed when feature flag is false', () => {
+      window.ENV.FEATURES.cc_in_rce_video_tray = false
+      renderComponent()
+      expect(tray.$closedCaptionPanel).toBeNull()
     })
   })
 

@@ -21,24 +21,29 @@ import PropTypes from 'prop-types'
 import I18n from 'i18n!assignment_index_menu'
 import ExternalToolModalLauncher from '../shared/ExternalToolModalLauncher'
 import Actions from './actions/IndexMenuActions'
+import ReactDOM from 'react-dom'
+import ContentTypeExternalToolTray from 'jsx/shared/ContentTypeExternalToolTray'
+import {ltiState} from '../../../public/javascripts/lti/post_message/handleLtiPostMessage'
 
 export default class IndexMenu extends React.Component {
   static propTypes = {
     store: PropTypes.object.isRequired,
     contextType: PropTypes.string.isRequired,
     contextId: PropTypes.number.isRequired,
+    requestBulkEdit: PropTypes.func, // not required. no menu item if not specified
     setTrigger: PropTypes.func.isRequired,
     setDisableTrigger: PropTypes.func.isRequired,
     registerWeightToggle: PropTypes.func.isRequired,
     disableSyncToSis: PropTypes.func.isRequired,
     sisName: PropTypes.string.isRequired,
     postToSisDefault: PropTypes.bool.isRequired,
-    hasAssignments: PropTypes.bool.isRequired
+    hasAssignments: PropTypes.bool.isRequired,
+    assignmentGroupsCollection: PropTypes.object
   }
 
   state = this.props.store.getState()
 
-  componentWillMount() {
+  UNSAFE_componentWillMount() {
     this.setState(this.props.store.getState())
   }
 
@@ -121,6 +126,63 @@ export default class IndexMenu extends React.Component {
       </li>
     ))
 
+  renderTrayTools = () => {
+    if (ENV.assignment_index_menu_tools) {
+      return ENV.assignment_index_menu_tools.map(tool => (
+        <li key={tool.id} role="menuitem">
+          <a aria-label={tool.title} href="#" onClick={this.onLaunchTrayTool(tool)}>
+            {this.iconForTrayTool(tool)}
+            {tool.title}
+          </a>
+        </li>
+      ))
+    }
+  }
+
+  iconForTrayTool(tool) {
+    if (tool.canvas_icon_class) {
+      return <i className={tool.canvas_icon_class} />
+    } else if (tool.icon_url) {
+      return <img className="icon" alt="" src={tool.icon_url} />
+    }
+  }
+
+  onLaunchTrayTool = tool => e => {
+    if (e != null) {
+      e.preventDefault()
+    }
+    this.setExternalToolTray(tool, document.getElementById('course_assignment_settings_link'))
+  }
+
+  setExternalToolTray(tool, returnFocusTo) {
+    const handleDismiss = () => {
+      this.setExternalToolTray(null)
+      returnFocusTo.focus()
+      if (ltiState?.tray?.refreshOnClose) {
+        window.location.reload()
+      }
+    }
+    const groupData = [
+      {
+        course_id: this.props.contextId,
+        type: 'assignment_group'
+      }
+    ]
+    ReactDOM.render(
+      <ContentTypeExternalToolTray
+        tool={tool}
+        placement="assignment_index_menu"
+        acceptedResourceTypes={['assignment']}
+        targetResourceType="assignment"
+        allowItemSelection
+        selectableItems={groupData}
+        onDismiss={handleDismiss}
+        open={tool !== null}
+      />,
+      document.getElementById('external-tool-mount-point')
+    )
+  }
+
   render() {
     return (
       <div
@@ -141,6 +203,21 @@ export default class IndexMenu extends React.Component {
           <span className="screenreader-only">{I18n.t('Assignment Options')}</span>
         </a>
         <ul className="al-options" role="menu">
+          {this.props.requestBulkEdit && (
+            <li role="menuitem">
+              <a
+                tabIndex="0"
+                id="requestBulkEditMenuItem"
+                className="requestBulkEditMenuItem"
+                role="button"
+                title={I18n.t('Bulk Edit')}
+                onClick={this.props.requestBulkEdit}
+              >
+                <i className="icon-edit" />
+                {I18n.t('Bulk Edit')}
+              </a>
+            </li>
+          )}
           <li role="menuitem">
             <a
               ref="trigger"
@@ -157,6 +234,7 @@ export default class IndexMenu extends React.Component {
           </li>
           {this.renderDisablePostToSis()}
           {this.renderTools()}
+          {this.renderTrayTools()}
         </ul>
         {this.state.modalIsOpen && (
           <ExternalToolModalLauncher

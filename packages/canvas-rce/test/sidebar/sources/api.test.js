@@ -151,7 +151,10 @@ describe('sources/api', () => {
       return apiSource.fetchPage(uri).then(page => {
         assert.deepEqual(page, {
           bookmark: 'newBookmark',
-          links: [{href: 'link1', title: 'Link 1'}, {href: 'link2', title: 'Link 2'}]
+          links: [
+            {href: 'link1', title: 'Link 1'},
+            {href: 'link2', title: 'Link 2'}
+          ]
         })
       })
     })
@@ -163,7 +166,10 @@ describe('sources/api', () => {
       return apiSource.fetchPage(uri).then(page => {
         assert.deepEqual(page, {
           bookmark: 'newBookmark',
-          links: [{href: 'link1', title: 'Link 1'}, {href: 'link2', title: 'Link 2'}]
+          links: [
+            {href: 'link1', title: 'Link 1'},
+            {href: 'link2', title: 'Link 2'}
+          ]
         })
       })
     })
@@ -215,7 +221,7 @@ describe('sources/api', () => {
       return apiSource.fetchFiles('foo').then(body => {
         files.forEach((file, i) => {
           sinon.assert.calledWith(fileUrl.downloadToWrap, file.url)
-          assert.equal(body.files[i].url, wrapUrl)
+          assert.equal(body.files[i].href, wrapUrl)
         })
       })
     })
@@ -344,13 +350,15 @@ describe('sources/api', () => {
 
     describe('files', () => {
       beforeEach(() => {
-        wrapUrl = '/path?wrap=1'
+        wrapUrl = '/groups/123/path?wrap=1'
         sinon.stub(fileUrl, 'downloadToWrap').returns(wrapUrl)
+        sinon.stub(fileUrl, 'fixupFileUrl').returns(wrapUrl)
         sinon.stub(apiSource, 'getFile').returns(Promise.resolve(file))
       })
 
       afterEach(() => {
         fileUrl.downloadToWrap.restore()
+        fileUrl.fixupFileUrl.restore()
         apiSource.getFile.restore()
       })
 
@@ -371,60 +379,44 @@ describe('sources/api', () => {
         })
       })
 
-      it('converts returned file url from download to wrap', () => {
-        return apiSource.uploadFRD(fileDomObject, preflightProps).then(body => {
-          sinon.assert.calledWith(fileUrl.downloadToWrap, file.url)
-          assert.equal(body.url, wrapUrl)
-        })
-      })
-
-      it('handles s3 post-flight', () => {
+      it('handles s3 post-flight', async () => {
         preflightProps.upload_params.success_url = 'success-url'
         const s3File = {url: 's3-file-url'}
         fetchMock.mock(preflightProps.upload_params.success_url, s3File)
-        return apiSource.uploadFRD(fileDomObject, preflightProps).then(() => {
-          sinon.assert.calledWith(fileUrl.downloadToWrap, s3File.url)
-        })
+        const result = await apiSource.uploadFRD(fileDomObject, preflightProps)
+        assert.deepEqual(result, s3File)
       })
 
       it('handles inst-fs post-flight', () => {
         preflightProps.upload_url = 'instfs-upload-url'
         const fileId = '123'
         const response = {
-          location: `http://canvas/api/v1/files/${fileId}?foo=bar`
+          location: `http://canvas/api/v1/files/${fileId}?foo=bar`,
+          uuid: 'xyzzy'
         }
         fetchMock.mock(preflightProps.upload_url, response)
-        return apiSource.uploadFRD(fileDomObject, preflightProps).then(() => {
-          sinon.assert.calledWith(fileUrl.downloadToWrap, file.url)
+        return apiSource.uploadFRD(fileDomObject, preflightProps).then(response => {
           sinon.assert.calledWith(apiSource.getFile, fileId)
-        })
-      })
-    })
-
-    describe('images', () => {
-      let tabContext
-
-      beforeEach(() => {
-        tabContext = 'images'
-        wrapUrl = '/path?wrap=1'
-        sinon.stub(fileUrl, 'downloadToWrap').returns(wrapUrl)
-      })
-
-      afterEach(() => {
-        fileUrl.downloadToWrap.restore()
-      })
-
-      it('converts returned image url from download to wrap', () => {
-        return apiSource.uploadFRD(fileDomObject, preflightProps, tabContext).then(body => {
-          sinon.assert.calledWith(fileUrl.downloadToWrap, file.url)
-          assert.equal(body.url, wrapUrl)
+          assert.equal(response.uuid, 'xyzzy')
+          assert.equal(response.url, 'file-url')
         })
       })
     })
   })
 
   describe('api mapping', () => {
-    const body = {foo: 'bar'}
+    const body = {
+      bookmark: 'mo.images',
+      files: [{href: '/some/where', uuid: 'xyzzy'}]
+    }
+    props.images = {
+      group: {
+        isLoading: false,
+        hasMore: true,
+        bookmark: null,
+        files: []
+      }
+    }
 
     it('can fetch folders', () => {
       fetchMock.mock(/\/folders\?/, {body})
@@ -437,7 +429,23 @@ describe('sources/api', () => {
     it('requests images from API', () => {
       fetchMock.mock(/\/documents\?.*content_types=image/, {body})
       return apiSource.fetchImages(props).then(page => {
-        assert.deepEqual(page, body)
+        assert.deepEqual(page, {
+          bookmark: 'mo.images',
+          files: [{href: '/some/where?wrap=1', uuid: 'xyzzy'}]
+        })
+        fetchMock.restore()
+      })
+    })
+
+    it('requests subsequent page of images from API', () => {
+      props.images.group.bookmark = 'mo.images'
+      fetchMock.mock(/\/documents\?.*content_types=image/, 'should not get here')
+      fetchMock.mock(/mo.images/, {body})
+      return apiSource.fetchImages(props).then(page => {
+        assert.deepEqual(page, {
+          bookmark: 'mo.images',
+          files: [{href: '/some/where?wrap=1', uuid: 'xyzzy'}]
+        })
         fetchMock.restore()
       })
     })
@@ -534,7 +542,7 @@ describe('sources/api', () => {
       sinon.stub(fileUrl, 'downloadToWrap').returns(wrapUrl)
       return apiSource.getFile(id).then(file => {
         sinon.assert.calledWith(fileUrl.downloadToWrap, url)
-        assert.equal(file.url, wrapUrl)
+        assert.equal(file.href, wrapUrl)
         fileUrl.downloadToWrap.restore()
         fetchMock.restore()
       })
@@ -561,6 +569,21 @@ describe('sources/api', () => {
         assert.ok(fetchMock.done())
         assert.ok(fetchMock.lastUrl() === expectedUrl)
         fetchMock.restore()
+      })
+    })
+  })
+
+  describe('media object apis', () => {
+    describe('updateMediaObject', () => {
+      it('PUTs to the media_object endpoint', async () => {
+        const uri = `/api/media_objects/m-id?user_entered_title=${encodeURIComponent('new title')}`
+        fetchMock.put(uri, '{"media_id": "m-id", "title": "new title"}')
+        const response = await apiSource.updateMediaObject(
+          {},
+          {media_object_id: 'm-id', title: 'new title'}
+        )
+        assert.equal(fetchMock.lastOptions(uri).headers.Authorization, 'Bearer theJWT')
+        assert.deepEqual(response, {media_id: 'm-id', title: 'new title'})
       })
     })
   })

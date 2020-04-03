@@ -85,7 +85,6 @@ export default class AssignmentListItemView extends Backbone.View
   initialize: ->
     super
     @initializeChildViews()
-
     # we need the following line in order to access this view later
     @model.assignmentView = @
 
@@ -221,6 +220,8 @@ export default class AssignmentListItemView extends Backbone.View
     data.cyoe = CyoeHelper.getItemData(data.id, @isGraded() && (!@model.isQuiz() || data.is_quiz_assignment))
     data.return_to = encodeURIComponent window.location.pathname
 
+    data.quizzesRespondusEnabled = @model.quizzesRespondusEnabled()
+
     data.DIRECT_SHARE_ENABLED = !!ENV.DIRECT_SHARE_ENABLED
 
     if data.canManage
@@ -272,7 +273,6 @@ export default class AssignmentListItemView extends Backbone.View
   addMigratedQuizToList: (response) =>
     return unless response
     quizzes = response.migrated_assignment
-    debugger
     if quizzes
       @addAssignmentToList(quizzes[0])
 
@@ -322,7 +322,7 @@ export default class AssignmentListItemView extends Backbone.View
       return unless mountPoint
       ReactDOM.render(React.createElement(DirectShareUserModal, {
         open: open
-        courseId: ENV.COURSE_ID
+        courseId: ENV.COURSE_ID || ENV.COURSE.id
         contentShare: {content_type: 'assignment', content_id: @model.id}
         shouldReturnFocus: false
         onDismiss: dismissModal
@@ -344,7 +344,7 @@ export default class AssignmentListItemView extends Backbone.View
       return unless mountPoint
       ReactDOM.render(React.createElement(DirectShareCourseTray, {
         open: open
-        sourceCourseId: ENV.COURSE_ID
+        sourceCourseId: ENV.COURSE_ID || ENV.COURSE.id
         contentSelection: {assignments: [@model.id]}
         shouldReturnFocus: false
         onDismiss: dismissTray

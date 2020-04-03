@@ -19,10 +19,13 @@
 module Api::V1::Conferences
 
   API_CONFERENCE_JSON_OPTS = {
-    :only => %w(id title conference_type description
+    :only => %w(
+      id title conference_type description
       duration ended_at started_at user_ids long_running
-      recordings join_url has_advanced_settings conference_key)
-  }
+      recordings join_url has_advanced_settings conference_key
+      context_type context_id
+    ).freeze
+  }.freeze
 
   def api_conferences_json(conferences, user, session)
     json = conferences.map do |c|
@@ -78,6 +81,7 @@ module Api::V1::Conferences
         name: conference_type[:plugin].name,
         type: conference_type[:conference_type],
         settings: conference_user_setting_fields_json(conference_type[:user_setting_fields]),
+        free_trial: !!conference_type[:free_trial]
       }
     end
   end

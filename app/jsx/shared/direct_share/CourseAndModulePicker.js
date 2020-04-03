@@ -25,34 +25,48 @@ import {View} from '@instructure/ui-view'
 import useManagedCourseSearchApi from '../effects/useManagedCourseSearchApi'
 import useModuleCourseSearchApi from '../effects/useModuleCourseSearchApi'
 import SearchItemSelector from 'jsx/shared/components/SearchItemSelector'
+import ModulePositionPicker from './ModulePositionPicker'
 
 CourseAndModulePicker.propTypes = {
   selectedCourseId: string,
   setSelectedCourse: func,
-  setSelectedModule: func
+  selectedModuleId: string,
+  setSelectedModule: func,
+  setModuleItemPosition: func
 }
 
 export default function CourseAndModulePicker({
   selectedCourseId,
   setSelectedCourse,
-  setSelectedModule
+  selectedModuleId,
+  setSelectedModule,
+  setModuleItemPosition
 }) {
   return (
     <>
-      <SearchItemSelector
-        onItemSelected={setSelectedCourse}
-        renderLabel={I18n.t('Select a Course')}
-        itemSearchFunction={useManagedCourseSearchApi}
-      />
-      {selectedCourseId && (
-        <View display="block" margin="medium 0 0">
+      <View as="div" padding="0 0 small 0">
+        <SearchItemSelector
+          onItemSelected={setSelectedCourse}
+          renderLabel={I18n.t('Select a Course')}
+          itemSearchFunction={useManagedCourseSearchApi}
+        />
+      </View>
+      <View as="div" padding="0 0 small 0">
+        {selectedCourseId && (
           <SearchItemSelector
             onItemSelected={setSelectedModule}
             renderLabel={I18n.t('Select a Module (optional)')}
             itemSearchFunction={useModuleCourseSearchApi}
-            contextId={selectedCourseId}
+            contextId={selectedCourseId || null}
           />
-        </View>
+        )}
+      </View>
+      {selectedCourseId && selectedModuleId && (
+        <ModulePositionPicker
+          courseId={selectedCourseId || null}
+          moduleId={selectedModuleId || null}
+          setModuleItemPosition={setModuleItemPosition}
+        />
       )}
     </>
   )

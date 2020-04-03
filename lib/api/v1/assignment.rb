@@ -372,6 +372,8 @@ module Api::V1::Assignment
 
     hash['anonymous_grading'] = value_to_boolean(assignment.anonymous_grading)
     hash['anonymize_students'] = assignment.anonymize_students?
+
+    hash['require_lockdown_browser'] = assignment.settings&.dig('lockdown_browser', 'require_lockdown_browser') || false
     hash
   end
 
@@ -512,6 +514,7 @@ module Api::V1::Assignment
 
     if @overrides_affected.to_i > 0 || cached_due_dates_changed
       assignment.clear_cache_key(:availability)
+      assignment.quiz.clear_cache_key(:availability) if assignment.quiz?
       DueDateCacher.recompute(prepared_update[:assignment], update_grades: true, executing_user: user)
     end
 
@@ -614,19 +617,18 @@ module Api::V1::Assignment
     false
   end
 
-  def assignment_mute_status_valid?(assignment, assignment_params)
-    return true unless assignment_params.include?("muted") && assignment.moderated_grading?
-
-    # A moderated assignment may not be unmuted until grades have been published
-    assignment.grades_published? || value_to_boolean(assignment_params["muted"])
-  end
-
   def update_from_params(assignment, assignment_params, user, context = assignment.context)
     update_params = assignment_params.permit(allowed_assignment_input_fields)
 
     if update_params.key?('peer_reviews_assign_at')
       update_params['peer_reviews_due_at'] = update_params['peer_reviews_assign_at']
       update_params.delete('peer_reviews_assign_at')
+    end
+
+    if update_params.key?("anonymous_peer_reviews")
+      if Canvas::Plugin.value_to_boolean(update_params["anonymous_peer_reviews"]) != assignment.anonymous_peer_reviews
+        ::AssessmentRequest.where(asset: assignment.submissions).update_all(updated_at: Time.now.utc)
+      end
     end
 
     if update_params["submission_types"].is_a? Array
@@ -654,15 +656,6 @@ module Api::V1::Assignment
         assignment.grading_standard = grading_standard if grading_standard
       else
         assignment.grading_standard = nil
-      end
-    end
-
-    if assignment_params.key? "muted"
-      muted = value_to_boolean(assignment_params.delete("muted"))
-      if muted
-        assignment.mute!
-      else
-        assignment.unmute!
       end
     end
 
@@ -760,6 +753,16 @@ module Api::V1::Assignment
       end
     end
 
+    if update_lockdown_browser?(assignment_params)
+      update_lockdown_browser_settings(assignment, assignment_params)
+    end
+
+    if update_params['allowed_attempts'].to_i == -1 && assignment.allowed_attempts.nil?
+      # if allowed_attempts is nil, the api json will replace it with -1 for some reason
+      # so if it's included in the json to update, we should just ignore it
+      update_params.delete('allowed_attempts')
+    end
+
     apply_report_visibility_options!(assignment_params, assignment)
 
     assignment.updating_user = user
@@ -850,6 +853,12 @@ module Api::V1::Assignment
   def prepare_assignment_create_or_update(assignment, assignment_params, user, context = assignment.context)
     raise "needs strong params" unless assignment_params.is_a?(ActionController::Parameters)
 
+    if assignment_params[:points_possible].blank?
+      if assignment.new_record? || assignment_params.has_key?(:points_possible) # only change if they're deliberately updating to blank
+        assignment_params[:points_possible] = 0
+      end
+    end
+
     unless assignment.new_record?
       assignment.restore_attributes
       old_assignment = assignment.clone
@@ -927,7 +936,6 @@ module Api::V1::Assignment
     return false unless assignment_group_id_valid?(assignment, assignment_params)
     return false unless assignment_dates_valid?(assignment, assignment_params)
     return false unless submission_types_valid?(assignment, assignment_params)
-    return false unless assignment_mute_status_valid?(assignment, assignment_params)
     true
   end
 
@@ -987,5 +995,43 @@ module Api::V1::Assignment
       'external_tool_tag_attributes' => strong_anything,
       'submission_types' => strong_anything
     ]
+  end
+
+  def update_lockdown_browser?(assignment_params)
+    %i[
+      require_lockdown_browser
+      require_lockdown_browser_for_results
+      require_lockdown_browser_monitor
+      lockdown_browser_monitor_data
+      access_code
+    ].any? {|key| assignment_params.key?(key) }
+  end
+
+  def update_lockdown_browser_settings(assignment, assignment_params)
+    settings = assignment.settings || {}
+    ldb_settings = settings['lockdown_browser'] || {}
+
+    if assignment_params.key?('require_lockdown_browser')
+      ldb_settings[:require_lockdown_browser] = value_to_boolean(assignment_params[:require_lockdown_browser])
+    end
+
+    if assignment_params.key?('require_lockdown_browser_for_results')
+      ldb_settings[:require_lockdown_browser_for_results] = value_to_boolean(assignment_params[:require_lockdown_browser_for_results])
+    end
+
+    if assignment_params.key?('require_lockdown_browser_monitor')
+      ldb_settings[:require_lockdown_browser_monitor] = value_to_boolean(assignment_params[:require_lockdown_browser_monitor])
+    end
+
+    if assignment_params.key?('lockdown_browser_monitor_data')
+      ldb_settings[:lockdown_browser_monitor_data] = assignment_params[:lockdown_browser_monitor_data]
+    end
+
+    if assignment_params.key?('access_code')
+      ldb_settings[:access_code] = assignment_params[:access_code]
+    end
+
+    settings[:lockdown_browser] = ldb_settings
+    assignment.settings = settings
   end
 end

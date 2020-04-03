@@ -1537,10 +1537,11 @@ describe ExternalToolsController do
   end
 
   describe "'GET 'generate_sessionless_launch'" do
+    let(:login_pseudonym) { pseudonym(@user) }
     before do
       allow(BasicLTI::Sourcedid).to receive(:encryption_secret) {'encryption-secret-5T14NjaTbcYjc4'}
       allow(BasicLTI::Sourcedid).to receive(:signing_secret) {'signing-secret-vp04BNqApwdwUYPUI'}
-      user_session(@user)
+      user_session(@user, login_pseudonym)
     end
 
     it "generates a sessionless launch" do
@@ -1719,7 +1720,7 @@ describe ExternalToolsController do
 
     it 'redirects if there is no launch url associated with the tool' do
       no_url_tool = new_valid_tool(@course)
-      no_url_tool.update_attributes!(url: nil)
+      no_url_tool.update!(url: nil)
       params = {:course_id => @course.id, id: no_url_tool.id}
       expect(get :generate_sessionless_launch, params: params).to redirect_to course_url(@course)
     end
@@ -1733,14 +1734,29 @@ describe ExternalToolsController do
         t.save!
         t
       end
-      let(:account) { @course.account }
 
-      it 'redirects to session_token url with query params for lti 1.3 launch' do
+      let(:account) { @course.account }
+		  before do
+        @backup_controller_access_token = controller.instance_variable_get(:@access_token)
+      end
+      after { controller.instance_variable_set :@access_token, @backup_controller_access_token }
+
+      it 'returns the lti 1.3 launch url with a session token' do
+				controller.instance_variable_set :@access_token, login_pseudonym.user.access_tokens.create(purpose: 'test')
         get :generate_sessionless_launch, params: params
         expect(response).to be_successful
         json = JSON.parse(response.body.sub(/^while\(1\)\;/, ''))
-        return_to = CGI.parse(URI.parse(json['url']).query)['return_to']
-        expect(return_to.first).to eq("#{course_external_tools_url(@course)}/#{tool.id}")
+        url = URI.parse(json['url'])
+        expect(url.path).to eq("#{course_external_tools_path(@course)}/#{tool.id}")
+        expect(url.query).to match(/^display=borderless&session_token=[0-9a-zA-Z_\-]+$/)
+        token = SessionToken.parse(CGI.parse(url.query)['session_token'].first)
+        expect(token.pseudonym_id).to eq(login_pseudonym.global_id)
+      end
+
+      it "doesn't work when there is no access token (non-API access)" do
+        get :generate_sessionless_launch, params: params
+        expect(response).to_not be_successful
+        expect(response.code.to_i).to eq(401)
       end
     end
   end

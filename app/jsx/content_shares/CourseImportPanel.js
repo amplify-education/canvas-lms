@@ -27,12 +27,14 @@ import CourseAndModulePicker from 'jsx/shared/direct_share/CourseAndModulePicker
 
 CourseImportPanel.propTypes = {
   contentShare: contentShareShape.isRequired,
-  onClose: func
+  onClose: func,
+  onImport: func
 }
 
-export default function CourseImportPanel({contentShare, onClose}) {
+export default function CourseImportPanel({contentShare, onClose, onImport}) {
   const [selectedCourse, setSelectedCourse] = useState(null)
   const [selectedModule, setSelectedModule] = useState(null)
+  const [selectedPosition, setSelectedPosition] = useState(null)
   const [startImportOperationPromise, setStartImportOperationPromise] = useState(null)
 
   function startImportOperation() {
@@ -44,11 +46,19 @@ export default function CourseImportPanel({contentShare, onClose}) {
           migration_type: 'canvas_cartridge_importer',
           settings: {
             content_export_id: contentShare.content_export.id,
-            insert_into_module_id: selectedModule?.id
+            insert_into_module_id: selectedModule?.id || null,
+            insert_into_module_type: contentShare.content_type,
+            insert_into_module_position: selectedPosition
           }
         }
       })
     )
+    onImport(contentShare)
+  }
+
+  function handleSelectedCourse(course) {
+    setSelectedModule(null)
+    setSelectedCourse(course)
   }
 
   return (
@@ -61,8 +71,10 @@ export default function CourseImportPanel({contentShare, onClose}) {
       />
       <CourseAndModulePicker
         selectedCourseId={selectedCourse?.id}
-        setSelectedCourse={setSelectedCourse}
+        setSelectedCourse={handleSelectedCourse}
+        selectedModuleId={selectedModule?.id || null}
         setSelectedModule={setSelectedModule}
+        setModuleItemPosition={setSelectedPosition}
       />
       <ConfirmActionButtonBar
         padding="small 0 0 0"

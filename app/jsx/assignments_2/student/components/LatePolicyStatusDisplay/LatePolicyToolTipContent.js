@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import I18n from 'i18n!assignments_2_thing'
+import I18n from 'i18n!a2LatePolicyToolTipContent'
 import PropTypes from 'prop-types'
 import React from 'react'
 import {Text} from '@instructure/ui-elements'
@@ -23,7 +23,7 @@ import {Flex} from '@instructure/ui-layout'
 import GradeFormatHelper from '../../../../gradebook/shared/helpers/GradeFormatHelper'
 import AccessibleTipContent from './AccessibleTipContent'
 
-function LatePolicyToolTipContent(props) {
+export default function LatePolicyToolTipContent(props) {
   // TODO - At this point we really should just pass in the whole assignment and
   //        submission into this component and let it grab the data itself.
   const {attempt, gradingType, grade, originalGrade, pointsDeducted, pointsPossible} = props
@@ -99,4 +99,3 @@ LatePolicyToolTipContent.propTypes = {
   pointsPossible: PropTypes.number.isRequired
 }
 
-export default React.memo(LatePolicyToolTipContent)

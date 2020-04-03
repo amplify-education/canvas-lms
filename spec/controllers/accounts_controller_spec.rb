@@ -278,6 +278,7 @@ describe AccountsController do
         :enable_turnitin => true,
         :admins_can_change_passwords => true,
         :admins_can_view_notifications => true,
+        :limit_parent_app_web_access => true,
       }}}
       @account.reload
       expect(@account.global_includes?).to be_falsey
@@ -285,6 +286,7 @@ describe AccountsController do
       expect(@account.enable_turnitin?).to be_falsey
       expect(@account.admins_can_change_passwords?).to be_falsey
       expect(@account.admins_can_view_notifications?).to be_falsey
+      expect(@account.limit_parent_app_web_access?).to be_falsey
     end
 
     it "should allow site_admin to update certain settings" do
@@ -298,6 +300,7 @@ describe AccountsController do
         :enable_turnitin => true,
         :admins_can_change_passwords => true,
         :admins_can_view_notifications => true,
+        :limit_parent_app_web_access => true,
       }}}
       @account.reload
       expect(@account.global_includes?).to be_truthy
@@ -305,6 +308,7 @@ describe AccountsController do
       expect(@account.enable_turnitin?).to be_truthy
       expect(@account.admins_can_change_passwords?).to be_truthy
       expect(@account.admins_can_view_notifications?).to be_truthy
+      expect(@account.limit_parent_app_web_access?).to be_truthy
     end
 
     it 'does not allow anyone to set unexpected settings' do
@@ -357,6 +361,18 @@ describe AccountsController do
       expect(link['text']).to eq 'yo'
       expect(link['subtext']).to eq 'wiggity'
       expect(link['url']).to eq '#dawg'
+    end
+
+    it "doesn't allow invalid help links" do
+      account_with_admin_logged_in
+      post 'update', params: {:id => @account.id, :account => { :custom_help_links => { '0' =>
+        { :id => 'instructor_question', :text => 'Ask Your Instructor a Question',
+          :subtext => 'Questions are submitted to your instructor', :type => 'default',
+          :url => '#teacher_feedback', :available_to => ['student'],
+          :is_featured => true, :is_new => true }
+      }}}
+      expect(flash[:error]).to match(/update failed/)
+      expect(@account.reload.settings[:custom_help_links]).to be_nil
     end
 
     it "should allow updating services that appear in the ui for the current user" do
@@ -818,6 +834,16 @@ describe AccountsController do
       expect(response.body).to match(/\"id\":\"instructor_question\"/)
       expect(response.body).to match(/\"id\":\"search_the_canvas_guides\"/)
       expect(response.body).to match(/\"type\":\"default\"/)
+      expect(response.body).to_not match(/\"id\":\"covid\"/)
+    end
+
+    context "with featured_help_links enabled" do
+      it "should return the covid help link as a default" do
+        Account.site_admin.enable_feature!(:featured_help_links)
+        get 'help_links', params: {account_id: @account.id}
+        expect(response).to be_successful
+        expect(response.body).to match(/\"id\":\"covid\"/)
+      end
     end
 
     it "should return custom help links" do
@@ -1161,5 +1187,88 @@ describe AccountsController do
       expect(response.body).not_to match(/\"name\":\"apple\".+\"name\":\"Apps\".+\"name\":\"bar\".+\"name\":\"cappuccino\".+\"name\":\"foo\"/)
     end
 
+  end
+
+  describe "#eportfolio_moderation" do
+    before(:each) do
+      account_with_admin_logged_in
+
+      author.eportfolios.create!(name: "boring")
+      author.eportfolios.create!(name: "maybe spam", spam_status: "flagged_as_possible_spam")
+      author.eportfolios.create!(name: "spam", spam_status: "marked_as_spam")
+      author.eportfolios.create!(name: "not spam", spam_status: "marked_as_safe")
+    end
+
+    let(:author) do
+      user = User.create!
+      user.user_account_associations.create!(account: @account)
+      user
+    end
+
+    let(:vanished_author) do
+      user = User.create!
+      user.user_account_associations.create!(account: @account)
+      user.destroy
+      user
+    end
+
+    it "redirects the user to the account settings URL if the eportfolio_moderation flag is not enabled" do
+      get "eportfolio_moderation", params: {account_id: @account.id}
+      expect(response).to redirect_to(account_settings_url(@account))
+    end
+
+    context "when the eportfolio_moderation flag is enabled" do
+      before(:each) { @account.root_account.enable_feature!(:eportfolio_moderation) }
+
+      let(:returned_portfolios) { assigns[:eportfolios] }
+
+      it "returns eportfolios that have been auto-flagged as spam, or manually marked as spam/safe" do
+        get "eportfolio_moderation", params: {account_id: @account.id}
+        expect(returned_portfolios.count).to eq 3
+      end
+
+      it "ignores portfolios belonging to deleted users" do
+        vanished_eportfolio = Eportfolio.create!(user_id: vanished_author.id, name: "hello", spam_status: "marked_as_spam")
+
+        get "eportfolio_moderation", params: {account_id: @account.id}
+        expect(returned_portfolios).not_to include(vanished_eportfolio)
+      end
+
+      it "returns flagged_as_possible_spam results, then marked_as_spam, then marked_as_safe" do
+        get "eportfolio_moderation", params: {account_id: @account.id}
+        expect(returned_portfolios.pluck(:name)).to eq ["maybe spam", "spam", "not spam"]
+      end
+
+      it "excludes results from authors who have no portfolios marked as possible or definitive spam" do
+        safe_user = User.create!
+        safe_user.user_account_associations.create!(account: @account)
+        safe_eportfolio = safe_user.eportfolios.create!(name: ":)")
+        safe_eportfolio.update!(spam_status: "marked_as_safe")
+
+        get "eportfolio_moderation", params: {account_id: @account.id}
+        expect(returned_portfolios.pluck(:id)).not_to include(safe_eportfolio.id)
+      end
+
+      context "pagination" do
+        before(:once) do
+          Setting.set('eportfolio_moderation_results_per_page', 2)
+        end
+
+        it "does not return more than the specified results per page" do
+          get "eportfolio_moderation", params: {account_id: @account.id}
+          expect(returned_portfolios.count).to eq 2
+        end
+
+        it "returns the first page of results if no 'page' param is given" do
+          get "eportfolio_moderation", params: {account_id: @account.id}
+          expect(returned_portfolios.pluck(:name)).to eq ["maybe spam", "spam"]
+        end
+
+        it "paginates using the 'page' param if supplied" do
+          get "eportfolio_moderation", params: {account_id: @account.id, page: 2}
+          expect(returned_portfolios.pluck(:name)).to eq ["not spam"]
+        end
+      end
+    end
   end
 end

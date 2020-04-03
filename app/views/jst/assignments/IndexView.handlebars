@@ -8,6 +8,10 @@
   </h1>
 {{/if}}
 
+{{#if bulkEditMode}}
+  <div id="bulkEditRoot"></div>
+{{else}}
+
 <div tabindex="0" class="drag_and_drop_warning screenreader-only">
   {{#t}}Warning: for improved accessibility of reordering assignments and groups, please use the Move To Dialog option found in the menu.{{/t}}
 </div>
@@ -78,9 +82,12 @@
 <div data-view="assignmentGroups" class="item-group-container" id="ag-list"></div>
 <div id="copy-to-mount-point" />
 <div id="send-to-mount-point" />
+<div id="external-tool-mount-point" />
 
 {{#if ENV.PERMISSIONS.manage_assignments}}
   <form data-view="createGroup" class="form-dialog"></form>
   <form data-view="assignmentSettings" class="form-dialog"></form>
   <form data-view="assignmentSyncSettings" class="form-dialog"></form>
+{{/if}}
+
 {{/if}}

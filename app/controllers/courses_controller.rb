@@ -341,6 +341,7 @@ class CoursesController < ApplicationController
   include SyllabusHelper
   include WebZipExportHelper
   include CoursesHelper
+  include NewQuizzesFeaturesHelper
 
   before_action :require_user, :only => [:index, :activity_stream, :activity_stream_summary, :effective_due_dates, :offline_web_exports, :start_offline_web_export]
   before_action :require_user_or_observer, :only=>[:user_index]
@@ -779,10 +780,20 @@ class CoursesController < ApplicationController
         params_for_create.delete :storage_quota_mb
       end
 
+      # Hang on... caller may not have permission to manage course visibility
+      # settings. If not, make sure any attempt doesn't see the light of day.
+      unless course_permission_to?("manage_course_visibility", @account)
+        params_for_create.delete :public_syllabus
+        params_for_create.delete :is_public_to_auth_users
+        params_for_create.delete :public_syllabus_to_auth
+        params_for_create[:is_public] = false
+      end
+
       can_manage_sis = api_request? && @account.grants_right?(@current_user, :manage_sis)
       if can_manage_sis && value_to_boolean(params[:enable_sis_reactivation])
         @course = @domain_root_account.all_courses.where(
-          :sis_source_id => sis_course_id, :workflow_state => 'deleted').first
+          :sis_source_id => sis_course_id, :workflow_state => 'deleted'
+        ).first
         if @course
           @course.workflow_state = 'claimed'
           @course.account = @sub_account if @sub_account
@@ -1101,29 +1112,43 @@ class CoursesController < ApplicationController
     reject!('Search term required') unless params[:search_term]
     return unless authorized_action(@context, @current_user, :manage_content)
 
-    users_scope = User.where(UserSearch.like_condition('users.name'), pattern: UserSearch.like_string_for(params[:search_term])).
-      where.not(id: @current_user.id).active.distinct
-    admin_users_scope = users_scope.joins(account_users: [:account, :role]).merge(AccountUser.active).merge(Account.active)
-
-    union_scope = users_scope.joins(enrollments: :course).merge(Enrollment.active.of_admin_type).merge(Course.active).
+    users_scope = User.shard(Shard.current).where.not(id: @current_user.id).active.distinct
+    union_scope = teacher_scope(name_scope(users_scope), @context.root_account_id).
       union(
-        root_account_scope(admin_users_scope.merge(Role.full_account_admin), @context.root_account_id),
-        root_account_scope(admin_users_scope.merge(Role.custom_account_admin_with_permission('manage_content')), @context.root_account_id),
-        sub_account_scope(admin_users_scope.merge(Role.full_account_admin), @context.root_account_id),
-        sub_account_scope(admin_users_scope.merge(Role.custom_account_admin_with_permission('manage_content')), @context.root_account_id)
+        teacher_scope(email_scope(users_scope), @context.root_account_id),
+        admin_scope(name_scope(users_scope), @context.root_account_id).merge(Role.full_account_admin),
+        admin_scope(email_scope(users_scope), @context.root_account_id).merge(Role.full_account_admin),
+        admin_scope(name_scope(users_scope), @context.root_account_id).merge(Role.custom_account_admin_with_permission('manage_content')),
+        admin_scope(email_scope(users_scope), @context.root_account_id).merge(Role.custom_account_admin_with_permission('manage_content'))
       ).
       order(:name).
       distinct
     users = Api.paginate(union_scope, self, api_v1_course_content_share_users_url)
-    render :json => users_json(users, @current_user, session, ['avatar_url', 'email'])
+    render :json => users_json(users, @current_user, session, ['avatar_url', 'email'], @context, nil, ['pseudonym'])
   end
 
-  def root_account_scope(scope, root_account_id)
-    scope.where(account_users: {account_id: root_account_id})
+  def admin_scope(scope, root_account_id)
+    scope.joins(account_users: [:account, :role]).
+      merge(AccountUser.active).
+      merge(Account.active).
+      where("accounts.id = ? OR accounts.root_account_id = ?", root_account_id, root_account_id)
   end
 
-  def sub_account_scope(scope, root_account_id)
-    scope.where(account_users: {accounts: {root_account_id: root_account_id}})
+  def teacher_scope(scope, root_account_id)
+    scope.joins(enrollments: :course).
+      merge(Enrollment.active.of_admin_type).
+      merge(Course.active).
+      where(courses: {root_account_id: root_account_id})
+  end
+
+  def name_scope(scope)
+    scope.where(UserSearch.like_condition('users.name'), pattern: UserSearch.like_string_for(params[:search_term]))
+  end
+
+  def email_scope(scope)
+    scope.joins(:communication_channels).
+      where(communication_channels: {workflow_state: ['active', 'unconfirmed'], path_type: 'email'}).
+      where(UserSearch.like_condition('communication_channels.path'), pattern: UserSearch.like_string_for(params[:search_term]))
   end
 
   include Api::V1::PreviewHtml
@@ -1387,6 +1412,43 @@ class CoursesController < ApplicationController
     end
   end
 
+  def update_user_engine_choice (course, selection_obj, user_id)
+    old_selection = course.settings[:engine_selected][:user_id]
+    new_settings = {}
+    new_selections = {}
+    new_selections[:user_id] = {
+      newquizzes_engine_selected: selection_obj[:newquizzes_engine_selected],
+      expiration: selection_obj[:expiration]
+    }
+    new_selections.reverse_merge!(course.settings[:engine_selected])
+    new_selections
+  end
+
+  def new_quizzes_selection_update
+    @course = api_find(Course, params[:id])
+    if @course.root_account.feature_enabled?(:newquizzes_on_quiz_page)
+      old_settings = @course.settings
+      key_exists = old_settings.key?(:engine_selected)
+      user_id = @current_user.id
+      selection_obj = {
+        newquizzes_engine_selected: params[:newquizzes_engine_selected],
+        expiration: Time.zone.today + 30.days
+      }
+
+      new_settings = {}
+
+      if key_exists
+        new_settings[:engine_selected] = update_user_engine_choice(@course, selection_obj, user_id)
+      else
+        new_settings[:engine_selected] = {user_id: selection_obj}
+      end
+      new_settings.reverse_merge!(old_settings)
+      @course.settings = new_settings
+      @course.save
+      render :json => new_settings
+    end
+  end
+
   # @API Update course settings
   # Can update the following course settings:
   #
@@ -1468,6 +1530,25 @@ class CoursesController < ApplicationController
       else
         render :json => @course.errors, :status => :bad_request
       end
+    end
+  end
+
+  # @API Return test student for course
+  #
+  # Returns information for a test student in this course. Creates a test
+  # student if one does not already exist for the course. The caller must have
+  # permission to access the course's student view.
+  #
+  # @example_request
+  #   curl https://<canvas>/api/v1/courses/<course_id>/student_view_student \
+  #     -X GET \
+  #     -H 'Authorization: Bearer <token>'
+  #
+  # @returns User
+  def student_view_student
+    get_context
+    if authorized_action(@context, @current_user, :use_student_view)
+      render json: user_json(@context.student_view_student, @current_user, session)
     end
   end
 
@@ -1553,7 +1634,9 @@ class CoursesController < ApplicationController
       session[:accepted_enrollment_uuid] = enrollment.uuid
 
       if params[:action] != 'show'
-        redirect_to course_url(@context.id)
+        # Redirects back to HTTP_REFERER if it exists (so if you accept from an assignent page it will put
+        # you back on the same page you were looking at). Otherwise, it redirects back to the course homepage
+        redirect_back(fallback_location: course_url(@context.id))
       else
         @context_enrollment = enrollment
         enrollment = nil
@@ -1855,6 +1938,7 @@ class CoursesController < ApplicationController
           @context_membership = @context_enrollment # for AUA
           @context_enrollment.course = @context
           @context_enrollment.user = @current_user
+          @course_notifications_enabled = NotificationPolicyOverride.enabled_for(@current_user, @context)
         end
       end
 
@@ -1899,7 +1983,8 @@ class CoursesController < ApplicationController
                    id: @context.id.to_s,
                    pages_url: polymorphic_url([@context, :wiki_pages]),
                    front_page_title: @context&.wiki&.front_page&.title,
-                   default_view: default_view
+                   default_view: default_view,
+                   is_student: @context.user_is_student?(@current_user)
                  }
                })
 
@@ -1911,6 +1996,11 @@ class CoursesController < ApplicationController
         if @context.show_announcements_on_home_page? && @context.grants_right?(@current_user, session, :read_announcements)
           js_env TOTAL_USER_COUNT: @context.enrollments.active.count
           js_env(:SHOW_ANNOUNCEMENTS => true, :ANNOUNCEMENT_LIMIT => @context.home_page_announcement_limit)
+        end
+
+        if @domain_root_account&.feature_enabled?(:mute_notifications_by_course) && params[:view] == 'notifications'
+          render_course_notification_settings
+          return
         end
 
         @contexts = [@context]
@@ -2011,6 +2101,12 @@ class CoursesController < ApplicationController
         render_unauthorized_action
       end
     end
+  end
+
+  def render_course_notification_settings
+    add_crumb(t("Course Notification Settings"))
+    js_bundle :course_notification_settings_show
+    render html: '', layout: true
   end
 
   def confirm_action
@@ -2208,6 +2304,11 @@ class CoursesController < ApplicationController
     # For prepopulating the date fields
     js_env(:OLD_START_DATE => datetime_string(@context.start_at, :verbose))
     js_env(:OLD_END_DATE => datetime_string(@context.conclude_at, :verbose))
+    #
+    js_env(:QUIZZES_NEXT_ENABLED => new_quizzes_enabled?)
+    js_env(:NEW_QUIZZES_IMPORT => new_quizzes_import_enabled?)
+    js_env(:NEW_QUIZZES_MIGRATION => new_quizzes_migration_enabled?)
+    js_env(:NEW_QUIZZES_MIGRATION_DEFAULT => new_quizzes_migration_default)
   end
 
   def copy_course
@@ -2243,6 +2344,7 @@ class CoursesController < ApplicationController
         :context => @course, :migration_type => 'course_copy_importer',
         :initiated_source => api_request? ? (in_app? ? :api_in_app : :api) : :manual)
       @content_migration.migration_settings[:source_course_id] = @context.id
+      @content_migration.migration_settings[:import_quizzes_next] = true if params.dig(:settings, :import_quizzes_next)
       @content_migration.workflow_state = 'created'
       if (adjust_dates = params[:adjust_dates]) && Canvas::Plugin.value_to_boolean(adjust_dates[:enabled])
         params[:date_shift_options][adjust_dates[:operation]] = '1'
@@ -2390,6 +2492,9 @@ class CoursesController < ApplicationController
   # @argument course[syllabus_body] [String]
   #   The syllabus body for the course
   #
+  # @argument course[syllabus_course_summary] [Boolean]
+  #   Optional. Indicates whether the Course Summary (consisting of the course's assignments and calendar events) is displayed on the syllabus page. Defaults to +true+.
+  #
   # @argument course[grading_standard_id] [Integer]
   #   The grading standard id to set for the course.  If no value is provided for this argument the current grading_standard will be un-set from this course.
   #
@@ -2477,6 +2582,9 @@ class CoursesController < ApplicationController
       end
       if params_for_update.has_key?(:syllabus_body)
         params_for_update[:syllabus_body] = process_incoming_html_content(params_for_update[:syllabus_body])
+      end
+      unless @course.grants_right?(@current_user, :manage_course_visibility)
+        params_for_update.delete(:indexed)
       end
 
       account_id = params[:course].delete :account_id
@@ -2656,7 +2764,7 @@ class CoursesController < ApplicationController
 
       @course.attributes = params_for_update
 
-      if params[:course][:course_visibility].present?
+      if params[:course][:course_visibility].present? && @course.grants_right?(@current_user, :manage_course_visibility)
         visibility_configuration(params[:course])
       end
 
@@ -3262,12 +3370,12 @@ class CoursesController < ApplicationController
     return {} unless params[:course]
     params[:course].permit(:name, :group_weighting_scheme, :start_at, :conclude_at,
       :grading_standard_id, :grade_passback_setting, :is_public, :is_public_to_auth_users, :allow_student_wiki_edits, :show_public_context_messages,
-      :syllabus_body, :public_description, :allow_student_forum_attachments, :allow_student_discussion_topics, :allow_student_discussion_editing,
+      :syllabus_body, :syllabus_course_summary, :public_description, :allow_student_forum_attachments, :allow_student_discussion_topics, :allow_student_discussion_editing,
       :show_total_grade_as_points, :default_wiki_editing_roles, :allow_student_organized_groups, :course_code, :default_view,
       :open_enrollment, :allow_wiki_comments, :turnitin_comments, :self_enrollment, :license, :indexed,
       :abstract_course, :storage_quota, :storage_quota_mb, :restrict_enrollments_to_course_dates, :use_rights_required,
       :restrict_student_past_view, :restrict_student_future_view, :grading_standard, :grading_standard_enabled,
-      :locale, :integration_id, :hide_final_grades, :hide_distribution_graphs, :lock_all_announcements, :public_syllabus,
+      :locale, :integration_id, :hide_final_grades, :hide_distribution_graphs, :lock_all_announcements, :public_syllabus, :quiz_engine_selected,
       :public_syllabus_to_auth, :course_format, :time_zone, :organize_epub_by_content_type, :enable_offline_web_export,
       :show_announcements_on_home_page, :home_page_announcement_limit, :allow_final_grade_override, :filter_speed_grader_by_student_group
     )

@@ -37,7 +37,10 @@ module Api::V1::Tab
     hash[:visibility] = visibility(tab, hash)
     hash[:label] = tab[:label]
     hash[:type] = (tab[:external] && 'external') || 'internal'
-    hash[:url] = sessionless_launch_url(context, :id => tab[:args][1], :launch_type => 'course_navigation') if tab[:external] && tab[:args] && tab[:args].length > 1
+    if tab[:external] && tab[:args] && tab[:args].length > 1
+      launch_type = context.is_a?(Account) ? 'account_navigation' : 'course_navigation'
+      hash[:url] = sessionless_launch_url(context, id: tab[:args][1], launch_type: launch_type)
+    end
     api_json(hash, user, session)
   end
 
@@ -51,9 +54,12 @@ module Api::V1::Tab
     end
 
     if tab[:args]
-      # If last argument is a hash (of options), we can't add on another options hash;
-      # we need to merge it into the existing options.
-      if tab[:args].last.is_a?(Hash) || tab[:args].last.is_a?(ActionController::Parameters)
+      if tab[:args].is_a?(Hash)
+        # LTI 2 tools have args as a hash rather than an array (see MessageHandler#lti_apps_tabs)
+        send(method, opts.merge(tab[:args].symbolize_keys))
+      elsif tab[:args].last.is_a?(Hash) || tab[:args].last.is_a?(ActionController::Parameters)
+        # If last argument is a hash (of options), we can't add on another options hash;
+        # we need to merge it into the existing options.
         # can't do tab[:args].last.merge(opts), that may convert :host to 'host'
         send(method, *tab[:args][0..-2], opts.merge(tab[:args].last))
       else

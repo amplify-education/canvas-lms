@@ -239,6 +239,46 @@ describe Canvas::LiveEvents do
     end
   end
 
+  describe '.course_grade_change' do
+    before(:once) do
+      @user = User.create!
+      @course = Course.create!
+    end
+
+    let(:course_context) do
+      hash_including(
+        root_account_uuid: @course.root_account.uuid,
+        root_account_id: @course.root_account.global_id.to_s,
+        root_account_lti_guid: @course.root_account.lti_guid.to_s,
+        context_id: @course.global_id.to_s,
+        context_type: 'Course'
+      )
+    end
+
+    it 'should include the course context, current scores and old scores' do
+      enrollment_model
+      score = Score.new(
+        course_score: true, enrollment: @enrollment,
+        current_score: 5.0, final_score: 4.0, unposted_current_score: 3.0, unposted_final_score: 2.0
+      )
+
+      expected_body = hash_including(
+        current_score: 5.0, final_score: 4.0, unposted_current_score: 3.0, unposted_final_score: 2.0,
+        old_current_score: 1.0, old_final_score: 2.0, old_unposted_current_score: 3.0, old_unposted_final_score: 4.0,
+        course_id: @enrollment.course_id.to_s, user_id: @enrollment.user_id.to_s,
+        workflow_state: 'active'
+      )
+      expect_event('course_grade_change', expected_body, course_context)
+
+      Canvas::LiveEvents.course_grade_change(score, {
+        current_score: 1.0,
+        final_score: 2.0,
+        unposted_current_score: 3.0,
+        unposted_final_score: 4.0
+      }, score.enrollment)
+    end
+  end
+
   describe ".grade_changed" do
     let(:course_context) do
       hash_including(
@@ -413,9 +453,6 @@ describe Canvas::LiveEvents do
 
       context "with post policies enabled" do
         before(:each) do
-          @course.enable_feature!(:new_gradebook)
-          PostPolicy.enable_feature!
-
           assignment.hide_submissions
         end
 
@@ -480,7 +517,7 @@ describe Canvas::LiveEvents do
       end
 
       it 'should include the group_id if assignment is a group assignment' do
-        submission.update_attributes(group: group)
+        submission.update(group: group)
 
         expect_event('submission_created',
           hash_including(
@@ -503,11 +540,22 @@ describe Canvas::LiveEvents do
       end
 
       it 'should include the group_id if assignment is a group assignment' do
-        submission.update_attributes(group: group)
+        submission.update(group: group)
 
         expect_event('submission_updated',
           hash_including(
             group_id: group.id.to_s
+          ))
+        Canvas::LiveEvents.submission_updated(submission)
+      end
+
+      it 'should include late and missing flags' do
+        submission.update_attributes(late_policy_status: 'missing')
+
+        expect_event('submission_updated',
+          hash_including(
+            late: false,
+            missing: true
           ))
         Canvas::LiveEvents.submission_updated(submission)
       end
@@ -545,7 +593,7 @@ describe Canvas::LiveEvents do
       end
 
       it 'should include the group_id if assignment is a group assignment' do
-        submission.update_attributes(group: group)
+        submission.update(group: group)
 
         expect_event('plagiarism_resubmit',
           hash_including(
@@ -647,6 +695,25 @@ describe Canvas::LiveEvents do
 
       Canvas::LiveEvents.asset_access(@attachment, 'files', 'role', 'participation', context: context)
     end
+
+    it "should include enrollment data if provided" do
+      course_with_student
+
+      expect_event('asset_accessed', {
+        asset_name: "Unnamed Course",
+        asset_type: 'course',
+        asset_id: @course.global_id.to_s,
+        asset_subtype: 'assignments',
+        category: 'category',
+        role: 'role',
+        level: 'participation',
+        enrollment_id: @enrollment.id.to_s,
+        section_id: @enrollment.course_section_id.to_s
+      }, {compact_live_events: true}).once
+
+      Canvas::LiveEvents.asset_access([ "assignments", @course ], 'category', 'role', 'participation',
+        context: nil, context_membership: @enrollment)
+    end
   end
 
   describe '.assignment_created' do
@@ -738,6 +805,64 @@ describe Canvas::LiveEvents do
         expect_event('assignment_group_created', expected_data).once
         Canvas::LiveEvents.assignment_group_created(assignment_group)
       end
+    end
+  end
+
+  describe 'assignment_override_updated' do
+    def base_override_hash(override)
+      {
+        assignment_override_id: override.id.to_s,
+        assignment_id: override.assignment.id.to_s,
+        due_at: override.due_at,
+        all_day: override.all_day,
+        all_day_date: override.all_day_date,
+        unlock_at: override.unlock_at,
+        lock_at: override.lock_at,
+        type: override.set_type,
+        workflow_state: override.workflow_state,
+      }.compact!
+    end
+
+    it 'triggers a live event with ADHOC assignment override details' do
+      course_with_student_submissions
+      assignment = @course.assignments.first
+      override = create_adhoc_override_for_assignment(assignment, @student)
+
+      expect_event('assignment_override_updated',
+        hash_including(base_override_hash(override).merge({
+          type: 'ADHOC',
+        }))).once
+
+      Canvas::LiveEvents.assignment_override_updated(override)
+    end
+
+    it 'triggers a live event with CourseSection assignment override details' do
+      course_with_student_submissions
+      assignment = @course.assignments.first
+      override = create_section_override_for_assignment(assignment)
+      section = override.set
+
+      expect_event('assignment_override_updated',
+        hash_including(base_override_hash(override).merge({
+          type: 'CourseSection',
+          course_section_id: section.id.to_s,
+        }))).once
+
+      Canvas::LiveEvents.assignment_override_updated(override)
+    end
+
+    it 'triggers a live event with Group assignment override details' do
+      course_with_student
+      assignment = group_assignment_discussion(course: @course).assignment
+      override = create_group_override_for_assignment(assignment, group: @group)
+
+      expect_event('assignment_override_updated',
+        hash_including(base_override_hash(override).merge({
+          type: 'Group',
+          group_id: override.set.id.to_s,
+        }))).once
+
+      Canvas::LiveEvents.assignment_override_updated(override)
     end
   end
 

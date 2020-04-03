@@ -54,19 +54,8 @@ describe Mutations::HideAssignmentGrades do
     CanvasSchema.execute(mutation_str, context: context)
   end
 
-  before(:each) do
-    course.enable_feature!(:new_gradebook)
-    PostPolicy.enable_feature!
-  end
-
   context "when user has grade permission" do
     let(:context) { { current_user: teacher } }
-
-    it "requires that the PostPolicy feature be enabled" do
-      PostPolicy.disable_feature!
-      result = execute_query(mutation_str(assignment_id: assignment.id), context)
-      expect(result.dig("errors", 0, "message")).to eql "Post Policies feature not enabled"
-    end
 
     it "requires that assignmentId be passed in the query" do
       result = execute_query(mutation_str, context)

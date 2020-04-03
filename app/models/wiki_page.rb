@@ -110,15 +110,14 @@ class WikiPage < ActiveRecord::Base
       baddies = self.context.wiki_pages.not_deleted.where(title: "Front Page").select{|p| p.url != "front-page" }
       baddies.each{|p| p.title = to_cased_title.call(p.url); p.save_without_broadcasting! }
     end
-    if existing = self.context.wiki_pages.not_deleted.where(title: self.title).first
-      return if existing == self
+    if existing = self.context.wiki_pages.not_deleted.where(title: self.title).where.not(:id => self.id).first
       real_title = self.title.gsub(/-(\d*)\z/, '') # remove any "-#" at the end
       n = $1 ? $1.to_i + 1 : 2
       begin
         mod = "-#{n}"
         new_title = real_title[0...(TITLE_LENGTH - mod.length)] + mod
         n = n.succ
-      end while self.context.wiki_pages.not_deleted.where(title: new_title).exists?
+      end while self.context.wiki_pages.not_deleted.where(title: new_title).where.not(:id => self.id).exists?
 
       self.title = new_title
     end
@@ -275,19 +274,13 @@ class WikiPage < ActiveRecord::Base
     given {|user| user && self.can_edit_page?(user)}
     can :update_content and can :read_revisions
 
-    given {|user, session| user && self.can_edit_page?(user) && self.wiki.grants_right?(user, session, :create_page)}
+    given {|user, session| user && self.wiki.grants_right?(user, session, :create_page)}
     can :create
 
     given {|user, session| user && self.can_edit_page?(user) && self.wiki.grants_right?(user, session, :update_page)}
     can :update and can :read_revisions
 
-    given {|user, session| user && self.can_edit_page?(user) && self.published? && self.wiki.grants_right?(user, session, :update_page_content)}
-    can :update_content and can :read_revisions
-
-    given {|user, session| user && self.can_edit_page?(user) && self.published? && self.wiki.grants_right?(user, session, :delete_page)}
-    can :delete
-
-    given {|user, session| user && self.can_edit_page?(user) && self.unpublished? && self.wiki.grants_right?(user, session, :delete_unpublished_page)}
+    given {|user, session| user && can_read_page?(user) && self.wiki.grants_right?(user, session, :delete_page)}
     can :delete
   end
 
@@ -299,8 +292,8 @@ class WikiPage < ActiveRecord::Base
   def can_edit_page?(user, session=nil)
     return false unless can_read_page?(user, session)
 
-    # wiki managers are always allowed to edit
-    return true if wiki.grants_right?(user, session, :manage)
+    # wiki managers are always allowed to edit.
+    return true if wiki.grants_right?(user, session, :update)
 
     roles = effective_roles
     # teachers implies all course admins (teachers, TAs, etc)
@@ -321,7 +314,7 @@ class WikiPage < ActiveRecord::Base
   end
 
   def available_for?(user, session=nil)
-    return true if wiki.grants_right?(user, session, :manage)
+    return true if wiki.grants_right?(user, session, :update)
 
     return false unless published? || (unpublished? && wiki.grants_right?(user, session, :view_unpublished_items))
     return false if locked_for?(user, :deep_check_if_needed => true)
@@ -339,6 +332,10 @@ class WikiPage < ActiveRecord::Base
     end
   end
 
+  def course_broadcast_data
+    context&.broadcast_data
+  end
+
   set_broadcast_policy do |p|
     p.dispatch :updated_wiki_page
     p.to { participants }
@@ -346,6 +343,7 @@ class WikiPage < ActiveRecord::Base
       BroadcastPolicies::WikiPagePolicy.new(wiki_page).
         should_dispatch_updated_wiki_page?
     end
+    p.data { course_broadcast_data }
   end
 
   def participants

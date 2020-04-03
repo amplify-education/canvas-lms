@@ -22,6 +22,10 @@
   height: 120px;
 }
 
+.assignment-student-header-sticky .assignment-pizza-header-outer {
+  height: 30px;
+}
+
 .assignment-pizza-header-inner {
   width: 100%;
   position: absolute;
@@ -38,7 +42,6 @@
   top: 0px;
   #{direction(right)}: 0px;
   background-color: white;
-  height: 120px;
   z-index: 100;
   border-bottom: 1px solid $ic-border-light;
 }

@@ -25,6 +25,7 @@ module Importers
     def self.process_migration_course_outline(data, migration)
       outline = data['course_outline'] ? data['course_outline']: nil
       return unless outline
+      return unless migration.import_object?('course_outline', outline['migration_id'])
       to_import = migration.to_import 'outline_folders'
 
       outline['root_folder'] = true
@@ -36,6 +37,7 @@ module Importers
     end
 
     def self.process_migration(data, migration)
+      migration.context.feature_enabled?(:conditional_release) # preload it so we don't try to do it inside a page transaction
       if migration.for_master_course_import? # make a tag if it doesn't exist
         migration.context.wiki.load_tag_for_master_course_import!(migration.child_subscription_id)
       end

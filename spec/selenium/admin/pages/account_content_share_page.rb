@@ -14,12 +14,22 @@
 #
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
+
 require_relative '../../common'
 
 module AccountContentSharePage
+  
   # ---------------------- Elements ----------------------
+  def page_body
+    f('body')
+  end
+
   def content_share_main_content
     f('#content')
+  end
+
+  def page_application_container
+    f('#application')
   end
 
   def received_table_rows
@@ -43,13 +53,27 @@ module AccountContentSharePage
   end
 
   def unread_item_button_icon(item_name)
-    fj("button:contains('#{item_name} is unread, click to mark as read')")
+    fj("button:contains('#{item_name} mark as read')")
   end
 
   def read_item_button_icon(item_name)
-    fj("button:contains('#{item_name} has been read')")
+    fj("button:contains('#{item_name} mark as unread')")
   end
+
+  def import_content_share
+    f("span[data-testid='import-menu-action']")
+  end
+
+  def preview_received_item
+    fj("li:contains('Preview')")
+  end
+
+  def import_received_item
+    fj("li:contains('Import')")
+  end
+
   # ---------------------- Actions -----------------------
+
   def visit_content_share_page
     get "/profile/content_shares"
   end

@@ -18,7 +18,7 @@
 
 import 'isomorphic-fetch'
 import {parse} from 'url'
-import {downloadToWrap} from '../../common/fileUrl'
+import {downloadToWrap, fixupFileUrl} from '../../common/fileUrl'
 import formatMessage from '../../format-message'
 import alertHandler from '../../rce/alertHandler'
 
@@ -64,7 +64,7 @@ function normalizeFileData(file) {
     display_name: file.name,
     ...file,
     // wrap the url
-    url: downloadToWrap(file.url)
+    href: downloadToWrap(file.href || file.url)
   }
 }
 
@@ -151,12 +151,17 @@ class RceApiSource {
   fetchDocs(props) {
     const documents = props.documents[props.contextType]
     const uri = documents.bookmark || this.uriFor('documents', props)
-    return this.apiFetch(uri, headerFor(this.jwt))
+    return this.apiFetch(uri, headerFor(this.jwt)).then(({bookmark, files}) => {
+      return {
+        bookmark,
+        files: files.map(f => fixupFileUrl(props.contextType, props.contextId, f))
+      }
+    })
   }
 
   fetchMedia(props) {
     const media = props.media[props.contextType]
-    const uri = media.bookmark || this.uriFor('media', props)
+    const uri = media.bookmark || this.uriFor('media_objects', props)
     return this.apiFetch(uri, headerFor(this.jwt))
   }
 
@@ -192,6 +197,14 @@ class RceApiSource {
     return this.apiPost(this.baseUri('media_objects'), headerFor(this.jwt), body)
   }
 
+  updateMediaObject(props, {media_object_id, title}) {
+    const uri = `${this.baseUri(
+      'media_objects',
+      props.host
+    )}/${media_object_id}?user_entered_title=${encodeURIComponent(title)}`
+    return this.apiPost(uri, headerFor(this.jwt), null, 'PUT')
+  }
+
   // fetches folders for the given context to upload files to
   fetchFolders(props, bookmark) {
     const headers = headerFor(this.jwt)
@@ -214,9 +227,15 @@ class RceApiSource {
   }
 
   fetchImages(props) {
-    const uri = props.bookmark || this.uriFor('images', props)
+    const images = props.images[props.contextType]
+    const uri = images.bookmark || this.uriFor('images', props)
     const headers = headerFor(this.jwt)
-    return this.apiFetch(uri, headers)
+    return this.apiFetch(uri, headers).then(({bookmark, files}) => {
+      return {
+        bookmark,
+        files: files.map(f => fixupFileUrl(props.contextType, props.contextId, f))
+      }
+    })
   }
 
   preflightUpload(fileProps, apiProps) {
@@ -248,7 +267,6 @@ class RceApiSource {
       .then(uploadResults => {
         return this.finalizeUpload(preflightProps, uploadResults)
       })
-      .then(normalizeFileData)
       .catch(_e => {
         this.alertFunc({
           text: formatMessage(
@@ -281,7 +299,10 @@ class RceApiSource {
         throw error
       }
       const fileId = matchData[1]
-      return this.getFile(fileId)
+      return this.getFile(fileId).then(fileResults => {
+        fileResults.uuid = uploadResults.uuid // if present, we'll need the uuid for the file verifier downstream
+        return fileResults
+      })
     } else {
       // local-storage upload, this _is_ the attachment information
       return Promise.resolve(uploadResults)
@@ -357,12 +378,12 @@ class RceApiSource {
   }
 
   // @private
-  apiPost(uri, headers, body) {
+  apiPost(uri, headers, body, method = 'POST') {
     headers = {...headers, 'Content-Type': 'application/json'}
     const fetchOptions = {
-      method: 'POST',
+      method,
       headers,
-      body: JSON.stringify(body)
+      body: body ? JSON.stringify(body) : undefined
     }
     uri = this.normalizeUriProtocol(uri)
     return fetch(uri, fetchOptions)
@@ -380,13 +401,14 @@ class RceApiSource {
       .then(checkStatus)
       .then(parseResponse)
       .catch(throwConnectionError)
-      .catch(_e => {
+      .catch(e => {
         this.alertFunc({
           text: formatMessage(
             'Something went wrong uploading, check your connection and try again.'
           ),
           variant: 'error'
         })
+        throw e
         // console.error(e) // eslint-disable-line no-console
       })
   }
@@ -445,13 +467,16 @@ class RceApiSource {
     let extra = ''
     switch (endpoint) {
       case 'images':
-        extra = '&content_types=image'
+        extra = `&content_types=image${getSortParams(props.sort, props.order)}`
         break
-      case 'media':
-        extra = '&content_types=video,audio'
+      case 'media': // when requesting media files via the documents endpoint
+        extra = `&content_types=video,audio${getSortParams(props.sort, props.order)}`
         break
       case 'documents':
-        extra = '&exclude_content_types=image,video,audio'
+        extra = `&exclude_content_types=image,video,audio${getSortParams(props.sort, props.order)}`
+        break
+      case 'media_objects': // when requesting media objects (this is the currently used branch)
+        extra = getSortParams(props.sort === 'alphabetical' ? 'title' : 'date', props.order)
         break
     }
     return `${this.baseUri(
@@ -459,6 +484,16 @@ class RceApiSource {
       host
     )}?contextType=${contextType}&contextId=${contextId}${extra}`
   }
+}
+
+function getSortParams(sort, order) {
+  let sortBy = sort
+  if (sortBy === 'date_added') {
+    sortBy = 'created_at'
+  } else if (sortBy === 'alphabetical') {
+    sortBy = 'name'
+  }
+  return `&sort=${sortBy}&order=${order}`
 }
 
 export default RceApiSource

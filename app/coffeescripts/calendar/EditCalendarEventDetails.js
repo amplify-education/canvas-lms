@@ -43,7 +43,8 @@ export default class EditCalendarEventDetails {
         contexts: this.event.possibleContexts(),
         lockedTitle: this.event.lockedTitle,
         location_name: this.event.location_name,
-        date: this.event.startDate()
+        date: this.event.startDate(),
+        is_child: this.event.object.parent_event_id != null
       })
     )
     $(selector).append(this.$form)
@@ -196,7 +197,7 @@ export default class EditCalendarEventDetails {
 
     // set them up as appropriate variants of datetime_field
     $date.date_field({
-      datepicker: {dateFormat: datePickerFormat(I18n.t('#date.formats.medium_with_weekday'))}
+      datepicker: {dateFormat: datePickerFormat(I18n.t('#date.formats.default'))}
     })
     $start.time_field()
     $end.time_field()

@@ -58,7 +58,7 @@ describe SisBatch do
 
   def process_csv_data(data, opts = {})
     create_csv_data(data) do |batch|
-      batch.update_attributes(opts) if opts.present?
+      batch.update(opts) if opts.present?
       batch.process_without_send_later
       run_jobs
       batch.reload
@@ -574,7 +574,7 @@ s2,test_1,section2,active},
 
       batch = create_csv_data([%{user_id,login_id,status
                                  user_1,user_1,active}])
-      batch.update_attributes(batch_mode: true, batch_mode_term: @term)
+      batch.update(batch_mode: true, batch_mode_term: @term)
       expect_any_instantiation_of(batch).to receive(:remove_previous_imports).once
       expect_any_instantiation_of(batch).to receive(:non_batch_courses_scope).never
       batch.process_without_send_later
@@ -774,10 +774,10 @@ s2,test_1,section2,active},
 
     it 'should not fail for empty diff file' do
       batch0 = create_csv_data([%{user_id,login_id,status}], add_empty_file: true)
-      batch0.update_attributes(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
+      batch0.update(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
       batch0.process_without_send_later
       batch1 = create_csv_data([%{user_id,login_id,status}], add_empty_file: true)
-      batch1.update_attributes(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
+      batch1.update(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
       batch1.process_without_send_later
 
       zip = Zip::File.open(batch1.generated_diff.open.path)
@@ -787,10 +787,10 @@ s2,test_1,section2,active},
 
     it 'should not fail for completely empty files' do
       batch0 = create_csv_data([], add_empty_file: true)
-      batch0.update_attributes(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
+      batch0.update(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
       batch0.process_without_send_later
       batch1 = create_csv_data([], add_empty_file: true)
-      batch1.update_attributes(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
+      batch1.update(diffing_data_set_identifier: 'default', options: {diffing_drop_status: 'completed'})
       batch1.process_without_send_later
       expect(batch1.reload).to be_imported
     end
@@ -1205,6 +1205,47 @@ test_1,u1,student,active}
         end
       end
 
+    end
+  end
+
+  describe 'live events' do
+
+    def test_batch
+      allow(LiveEvents).to receive(:post_event)
+      SisBatch.create(account: @account, workflow_state: :initializing)
+    end
+
+    it 'should trigger live event when created' do
+      expect(LiveEvents).to receive(:post_event).with(hash_including({
+        event_name: 'sis_batch_created',
+        payload: hash_including({
+          account_id: @account.id.to_s,
+          workflow_state: "initializing"
+        }),
+      }))
+      test_batch
+    end
+
+    it 'should trigger live event when workflow state is updated' do
+      batch = test_batch
+      expect(LiveEvents).to receive(:post_event).with(hash_including({
+        event_name: 'sis_batch_updated',
+        payload: hash_including({
+          account_id: @account.id.to_s,
+          workflow_state: "failed"
+        }),
+      }))
+      batch.workflow_state = :failed
+      batch.save!
+    end
+
+    it 'should not trigger live event when workflow state is unchanged' do
+      batch = test_batch
+      expect(LiveEvents).not_to receive(:post_event).with(hash_including({
+        event_name: 'sis_batch_updated'
+      }))
+      batch.progress = 1
+      batch.save!
     end
   end
 end

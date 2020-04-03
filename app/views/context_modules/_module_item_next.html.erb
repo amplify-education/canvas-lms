@@ -30,8 +30,6 @@
     'edit' => "<i class='icon-edit'></i>".html_safe,
     'delete' => "<i class='icon-end'></i>".html_safe,
     'duplicate' => "<i class='icon-copy-course'></i>".html_safe,
-    'copy_to' => "<i class='icon-duplicate'></i>".html_safe,
-    'send_to' => "<i class='icon-user'></i>".html_safe,
   }
 
   menu_type_to_class = {
@@ -52,7 +50,7 @@
     <% if module_item&.content&.respond_to?("can_duplicate?") %>
       <%= 'cannot-duplicate' if !module_item&.content&.can_duplicate?%>
     <% end %>
-    <%= module_item.content_type_class if module_item %>
+    <%= module_item.content_type_class(@is_student) if module_item %>
     <%= 'also_assignment' if module_item && module_item.graded? %>
     indent_<%= module_item.try_rescue(:indent) || '0' %>
     <%= 'progression_requirement' if criterion %>
@@ -81,13 +79,14 @@
     </div>
     <% end %>
 
-    <span class="type_icon" title="<%= module_item_translated_content_type(module_item) %>">
+    <span class="type_icon" title="<%= module_item_translated_content_type(module_item, @is_student) %>">
       <span class="ig-type-icon">
         <i class="icon-document" aria-label="<%= t('Item type: Document') %>"></i>
         <i class="icon-paperclip" aria-label="<%= t('Item type: Download') %>"></i>
         <i class="icon-discussion" aria-label="<%= t('Item type: Discussion') %>"></i>
         <i class="icon-assignment" aria-label="<%= t('Item type: Assignment') %>"></i>
-        <i class="icon-quiz" aria-label="<%= t('Item type: Quiz') %>"></i>
+        <i class="icon-quiz" aria-label="<%= module_item_translated_quiz_type(module_item, @is_student) %>"></i>
+        <i class="icon-quiz icon-Solid" aria-label="<%= module_item_translated_quiz_type(module_item, @is_student) %>"></i>
         <i class="icon-link" aria-label="<%= t('Item type: Link') %>"></i>
       </span>
     </span>
@@ -252,26 +251,6 @@
               ><%= t("Move to...") %></a>
             </li>
             <li role="presentation"><a href="<%= context_url(@context, :context_url) %>/modules/items/<%= module_item ? module_item.id : "{{ id }}" %>" class="delete_item_link delete_link" title="<%= t('Remove this item from the module') %>"><i class="icon-trash"></i> <%= t('Remove') %></a></li>
-            <% if @domain_root_account&.feature_enabled?(:direct_share) %>
-              <li role="presentation">
-                <a
-                  href="#"
-                  class="module_item_send_to"
-                  title="<%= t("Send this module item to another user...") %>"
-                  aria-label="<%= t("Send this module item to another user...") %>"
-                  ><%= @module_item_image_tags['send_to'] %> <%= t('Send To...') %>
-                </a>
-              </li>
-              <li role="presentation">
-                <a
-                  href="#"
-                  class="module_item_copy_to"
-                  title="<%= t('Copy this module item to a course...') %>"
-                  aria-label="<%= t('Copy this module item to a course...') %>"
-                  ><%= @module_item_image_tags['copy_to'] %> <%= t('Copy To...') %>
-                </a>
-              </li>
-            <% end %>
             <% menu_type_to_class.each do |menu_type, content_class| %>
               <% if !module_item || module_item.content.is_a?(content_class) %>
                 <%

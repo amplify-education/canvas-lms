@@ -23,7 +23,7 @@ describe Types::SubmissionType do
   before(:once) do
     student_in_course(active_all: true)
     @assignment = @course.assignments.create! name: "asdf", points_possible: 10
-    @submission, _ = @assignment.grade_student(@student, score: 8, grader: @teacher)
+    @submission = @assignment.grade_student(@student, score: 8, grader: @teacher).first
   end
 
   let(:submission_type) { GraphQLTypeTester.new(@submission, current_user: @teacher) }
@@ -41,7 +41,6 @@ describe Types::SubmissionType do
 
   describe "posted" do
     it "returns the posted status of the submission" do
-      PostPolicy.enable_feature!
       @submission.update!(posted_at: nil)
       expect(submission_type.resolve("posted")).to eq false
       @submission.update!(posted_at: Time.zone.now)
@@ -106,7 +105,7 @@ describe Types::SubmissionType do
 
   describe "score and grade" do
     context "muted assignment" do
-      before { @assignment.update_attribute(:muted, true) }
+      before { @assignment.mute! }
 
       it "returns score/grade for teachers when assignment is muted" do
         expect(submission_type.resolve("score", current_user: @teacher)).to eq @submission.score
@@ -471,6 +470,7 @@ describe Types::SubmissionType do
 
     before(:once) do
       @submission.turnitin_data[@submission.asset_string] = tii_data
+      @submission.turnitin_data[:last_processed_attempt] = 1
       @submission.save!
     end
 

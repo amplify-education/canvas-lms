@@ -25,10 +25,10 @@
 /db/schema.rb
 /db/*.sqlite*
 /db/*sql
+docker-compose.override.yml
 /exports/
 Gemfile.lock
 Gemfile.lock.next
-knapsack_rspec_report.json
 /log/
 mkmf.log
 /node_modules
@@ -81,3 +81,6 @@ docker-compose.local.*
 .nyc_output
 coverage-jest
 coverage-karma
+
+# generated graphql schema
+schema.graphql

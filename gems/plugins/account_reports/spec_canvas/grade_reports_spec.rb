@@ -71,6 +71,9 @@ describe "Default Account Reports" do
 
     @course2 = course_factory(:course_name => 'Math 101', :account => @account, :active_course => true)
 
+    @course1.default_post_policy.update!(post_manually: false)
+    @course2.default_post_policy.update!(post_manually: false)
+
     @enrollment1 = @course1.enroll_user(@user1, 'StudentEnrollment', :enrollment_state => :active)
     @enrollment2 = @course1.enroll_user(@user2, 'StudentEnrollment', :enrollment_state => :completed)
     @enrollment3 = @course2.enroll_user(@user2, 'StudentEnrollment', :enrollment_state => :active)
@@ -442,6 +445,7 @@ describe "Default Account Reports" do
         @course3 = course_factory(:course_name => 'Fun 404', :account => @account, :active_course => true)
         @course3.enroll_user(@user2, 'StudentEnrollment', :enrollment_state => :active)
         @course3.enroll_user(@user4, 'StudentEnrollment', :enrollment_state => :active)
+        @course3.default_post_policy.update!(post_manually: false)
 
         teacher = User.create!
         @course2.enroll_teacher(teacher)
@@ -450,8 +454,8 @@ describe "Default Account Reports" do
         # set up assignments
         past_assignment = @course2.assignments.create! points_possible: 100, due_at: 3.days.ago
         future_assignment = @course2.assignments.create! points_possible: 100, due_at: 3.days.from_now
-        unposted_future_assignment = @course2.assignments.create! points_possible: 100, due_at: 3.days.from_now,
-          muted: true
+        unposted_future_assignment = @course2.assignments.create! points_possible: 100, due_at: 3.days.from_now
+        unposted_future_assignment.ensure_post_policy(post_manually: true)
 
         Timecop.freeze(past.end_date - 1.day) do
           past_assignment.grade_student(@user2, grade: 25, grader: teacher)

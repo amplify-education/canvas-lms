@@ -51,7 +51,7 @@
       ))
     end
   %>
-  <%= browser_performance_monitor_embed %>
+  <%= render_datadog_rum_js %>
   <%= favicon_link_tag(favicon) %>
   <%= favicon_link_tag(brand_variable('ic-brand-apple-touch-icon'), rel: 'apple-touch-icon', type: nil) %>
   <%= stylesheet_link_tag(active_brand_config_url('css'), media: "all") %>
@@ -98,4 +98,9 @@
   <% end %>
   <title><%= @page_title || (yield :page_title).presence || t('default_page_title', "Canvas LMS") %></title>
   <%= render partial: 'layouts/google_analytics_snippet' %>
+
+  <!-- fullstory snippet -->
+  <% if fullstory_enabled_for_session?(session) %>
+    <%= render :partial => "shared/fullstory_snippet" %>
+  <% end %>
 </head>

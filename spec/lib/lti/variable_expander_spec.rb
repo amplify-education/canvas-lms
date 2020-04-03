@@ -52,6 +52,13 @@ module Lti
       allow(m).to receive(:use_1_3?).and_return(false)
       m
     end
+    let(:available_canvas_resources) {
+      [
+        {'id': '1', 'name': 'item 1'},
+        {'id': '2', 'name': 'item 2'}
+      ]
+    }
+
     let(:controller) do
       request_mock = double('request')
       allow(request_mock).to receive(:url).and_return('https://localhost')
@@ -62,10 +69,7 @@ module Lti
           'com_instructure_course_accept_canvas_resource_types': ['page', 'module'],
           'com_instructure_course_canvas_resource_type': 'page',
           'com_instructure_course_allow_canvas_resource_selection': 'true',
-          'com_instructure_course_available_canvas_resources': [
-            {'id': '1', 'name': 'item 1'},
-            {'id': '2', 'name': 'item 2'}
-          ]
+          'com_instructure_course_available_canvas_resources': available_canvas_resources
         }.with_indifferent_access
       )
       m = double('controller')
@@ -398,14 +402,14 @@ module Lti
       end
 
       it 'has a substitution for com.instructure.Assignment.lti.id when there is no tool setting' do
-        assignment.update_attributes(context: course)
+        assignment.update(context: course)
         variable_expander = VariableExpander.new(root_account,
                                                  account,
                                                  controller,
                                                  current_user: user,
                                                  tool: tool,
                                                  assignment: assignment)
-        assignment.update_attributes(context: course)
+        assignment.update(context: course)
         exp_hash = {test: '$com.instructure.Assignment.lti.id'}
         variable_expander.expand_variables!(exp_hash)
         expect(exp_hash[:test]).to eq assignment.lti_context_id
@@ -675,7 +679,7 @@ module Lti
       it 'has substitution for $com.instructure.Course.accept_canvas_resource_types' do
         exp_hash = {test: '$com.instructure.Course.accept_canvas_resource_types'}
         variable_expander.expand_variables!(exp_hash)
-        expect(exp_hash[:test]).to eq ["page", "module"]
+        expect(exp_hash[:test]).to eq "page,module"
       end
 
       it 'has substitution for $com.instructure.Course.canvas_resource_type' do
@@ -693,7 +697,33 @@ module Lti
       it 'has substitution for $com.instructure.Course.available_canvas_resources' do
         exp_hash = {test: '$com.instructure.Course.available_canvas_resources'}
         variable_expander.expand_variables!(exp_hash)
-        expect(exp_hash[:test]).to eq [{"id"=>"1", "name"=>"item 1"}, {"id"=>"2", "name"=>"item 2"}]
+        expect(JSON.parse(exp_hash[:test])).to eq [{"id"=>"1", "name"=>"item 1"}, {"id"=>"2", "name"=>"item 2"}]
+      end
+
+      context 'modules resources expansion' do
+        let(:available_canvas_resources) { [{"course_id" => course.id, "type" => "module"}] }
+
+        it 'has special substitution to get all course modules for $com.instructure.Course.available_canvas_resources' do
+          course.save!
+          m1 = course.context_modules.create!(:name => "mod1")
+          m2 = course.context_modules.create!(:name => "mod2")
+          exp_hash = {test: '$com.instructure.Course.available_canvas_resources'}
+          variable_expander.expand_variables!(exp_hash)
+          expect(JSON.parse(exp_hash[:test])).to eq [{"id"=>m1.id, "name"=>m1.name}, {"id"=>m2.id, "name"=>m2.name}]
+        end
+      end
+
+      context 'assignment groups resources expansion' do
+        let(:available_canvas_resources) { [{"course_id" => course.id, "type" => "assignment_group"}] }
+
+        it 'has special substitution to get all course modules for $com.instructure.Course.available_canvas_resources' do
+          course.save!
+          m1 = course.assignment_groups.create!(:name => "mod1")
+          m2 = course.assignment_groups.create!(:name => "mod2")
+          exp_hash = {test: '$com.instructure.Course.available_canvas_resources'}
+          variable_expander.expand_variables!(exp_hash)
+          expect(JSON.parse(exp_hash[:test])).to eq [{"id"=>m1.id, "name"=>m1.name}, {"id"=>m2.id, "name"=>m2.name}]
+        end
       end
 
       context 'context is a group' do
@@ -738,8 +768,8 @@ module Lti
         end
 
         before do
-          group.update_attributes!(users: [user])
-          new_assignment.update_attributes!(group_category: group_category)
+          group.update!(users: [user])
+          new_assignment.update!(group_category: group_category)
         end
 
         shared_examples 'a safe expansion when assignment is blank' do
@@ -1076,6 +1106,14 @@ module Lti
           expect(exp_hash[:test]).to eq '2015-05-21 17:01:36'
         end
 
+        it 'has substitution for $Canvas.course.endAt' do
+          course.conclude_at = '2019-04-21 17:01:36'
+          course.save!
+          exp_hash = {test: '$Canvas.course.endAt'}
+          variable_expander.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq '2019-04-21 17:01:36'
+        end
+
         it 'has a functioning guard for $Canvas.term.name when term.name is not set' do
           term = course.enrollment_term
           exp_hash = {test: '$Canvas.term.name'}
@@ -1316,6 +1354,13 @@ module Lti
           exp_hash = {test: '$com.instructure.Person.name_sortable'}
           variable_expander.expand_variables!(exp_hash)
           expect(exp_hash[:test]).to eq 'Jake, Uncle'
+        end
+
+        it 'has substitution for $com.instructure.Person.pronouns' do
+          user.pronouns = 'She/Her'
+          exp_hash = {test: '$com.instructure.Person.pronouns'}
+          variable_expander.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq 'She/Her'
         end
 
         it 'has substitution for $Person.email.primary' do

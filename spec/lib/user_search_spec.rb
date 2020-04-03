@@ -166,6 +166,7 @@ describe UserSearch do
           before do
             pseudonym.sis_user_id = "SOME_SIS_ID"
             pseudonym.unique_id = "SOME_UNIQUE_ID@example.com"
+            pseudonym.current_login_at = Time.utc(2019,11,11)
             pseudonym.save!
           end
 
@@ -195,6 +196,11 @@ describe UserSearch do
             RoleOverride.create!(context: Account.default, role: Role.get_built_in_role('TeacherEnrollment'),
               permission: 'view_user_logins', enabled: false)
             expect(UserSearch.for_user_in_context("UNIQUE_ID", course, user)).to eq []
+          end
+
+          it 'returns the last_login column when searching and sorting' do
+            results = UserSearch.for_user_in_context("UNIQUE_ID", course, user, nil, sort: 'last_login')
+            expect(results.first.last_login).to eq(Time.utc(2019,11,11))
           end
 
           it 'can match an SIS id and a user name in the same query' do
@@ -249,7 +255,7 @@ describe UserSearch do
           end
 
           it 'will not match channels where the type is not email' do
-            cc.update_attributes!(:path_type => CommunicationChannel::TYPE_TWITTER)
+            cc.update!(:path_type => CommunicationChannel::TYPE_TWITTER)
             expect(UserSearch.for_user_in_context("the.giver", course, user)).to eq []
           end
 
@@ -445,7 +451,7 @@ describe UserSearch do
       group = @course.groups.create!
       group.add_user(@student)
       account_admin_user
-      expect(UserSearch.scope_for(group, @admin, :enrollment_type => ['student']).to_a).to eq [@student]
+      expect(UserSearch.scope_for(group, @admin, :enrollment_type => ['student'], include_inactive_enrollments: true).to_a).to eq [@student]
       expect(UserSearch.scope_for(group, @admin, :enrollment_type => ['teacher']).to_a).to be_empty
     end
 

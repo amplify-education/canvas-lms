@@ -157,8 +157,7 @@ describe Message do
     describe "course nicknames" do
       before(:once) do
         course_with_student(:active_all => true, :course_name => 'badly-named-course')
-        @student.course_nicknames[@course.id] = 'student-course-nick'
-        @student.save!
+        @student.set_preference(:course_nicknames, @course.id, 'student-course-nick')
       end
 
       def check_message(message, asset)
@@ -299,6 +298,16 @@ describe Message do
       expect{ message.deliver }.not_to raise_error
     end
 
+    it "logs stats on deliver" do
+      expect(InstStatsd::Statsd).to receive(:increment).with("message.deliver.email.my_name",
+                                                             {short_stat: "message.deliver",
+                                                              tags: {path_type: "email", notification_name: 'my_name'}})
+
+      message = message_model(dispatch_at: Time.now - 1, notification_name: 'my_name', workflow_state: 'staged', to: 'somebody', updated_at: Time.now.utc - 11.minutes, path_type: 'email', user: @user)
+      expect(message).to receive(:dispatch).and_return(true)
+      @message.deliver
+    end
+
     context 'push' do
       before :once do
         user_model
@@ -333,6 +342,45 @@ describe Message do
 
       before do
         allow(Canvas::Twilio).to receive(:enabled?).and_return(true)
+      end
+
+      context 'with the deprecate_sms feature enabled' do
+        before :each do
+          @user.account.enable_feature!(:deprecate_sms)
+        end
+
+        after :each do
+          @user.account.disable_feature!(:deprecate_sms)
+        end
+
+        it "allows whitelisted notification types" do
+          message_model(
+            dispatch_at: Time.now,
+            workflow_state: 'staged',
+            to: '+18015550100',
+            updated_at: Time.now.utc - 11.minutes,
+            path_type: 'sms',
+            notification_name: 'Assignment Graded',
+            user: @user
+          )
+          expect(@message).to receive(:deliver_via_sms)
+          @message.deliver
+        end
+
+        it "does not deliver notification types not on the whitelist" do
+          message_model(
+            dispatch_at: Time.now,
+            workflow_state: 'staged',
+            to: '+18015550100',
+            updated_at: Time.now.utc - 11.minutes,
+            path_type: 'sms',
+            notification_name: 'Conversation Message',
+            user: @user
+          )
+          expect(@message).to receive(:deliver_via_sms).never
+          @message.deliver
+        end
+
       end
 
       it "uses Twilio for E.164 paths" do
@@ -654,7 +702,7 @@ describe Message do
     url = "a" * 256
     msg = Message.new
     msg.url = url
-    msg.save!
+    expect{ msg.save! }.to_not raise_error
   end
 
   describe "#context_context" do

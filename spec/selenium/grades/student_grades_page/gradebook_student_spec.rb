@@ -20,7 +20,6 @@ require_relative './gradebook_student_common'
 require_relative '../setup/gradebook_setup'
 require_relative '../pages/student_grades_page'
 
-
 describe 'Student Gradebook' do
   include_context "in-process server selenium tests"
   include GradebookCommon
@@ -229,8 +228,7 @@ describe 'Student Gradebook' do
     end
 
     it 'should not display comments from a teacher on student grades page if assignment is muted', priority: "1", test_id: 537620 do
-      assignment.muted = true
-      assignment.save!
+      assignment.ensure_post_policy(post_manually: true)
       user_session(student)
 
       get "/courses/#{published_course.id}/grades"
@@ -245,8 +243,7 @@ describe 'Student Gradebook' do
     end
 
     it 'should not display comments from a teacher on assignment show page if assignment is muted', priority: "1", test_id: 537867 do
-      assignment.muted = true
-      assignment.save!
+      assignment.ensure_post_policy(post_manually: true)
       user_session(student)
 
       get "/courses/#{published_course.id}/assignments/#{assignment.id}"
@@ -317,4 +314,3 @@ describe 'Student Gradebook' do
     end
   end
 end
-

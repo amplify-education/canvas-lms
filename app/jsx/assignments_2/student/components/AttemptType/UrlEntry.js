@@ -46,7 +46,8 @@ class UrlEntry extends React.Component {
 
   componentDidUpdate(prevProps) {
     if (
-      this.props.submission?.submissionDraft?.url !== prevProps.submission?.submissionDraft?.url
+      this.props.submission?.submissionDraft?.url &&
+      this.props.submission.submissionDraft.url !== prevProps.submission?.submissionDraft?.url
     ) {
       this.updateInputState()
     }
@@ -185,7 +186,7 @@ class UrlEntry extends React.Component {
   }
 
   renderAttempt = () => (
-    <View as="div" borderWidth="small" data-testid="url-entry">
+    <View as="div" borderWidth="small" data-testid="url-entry" margin="0 0 medium 0">
       <Billboard
         heading={I18n.t('Website Url')}
         hero={<IconLinkLine color="brand" />}
@@ -205,7 +206,7 @@ class UrlEntry extends React.Component {
               margin="small"
               onClick={() => window.open(this.props.submission.url)}
             >
-              {this.props.submission.url}
+              <span data-testid="url-submission-text">{this.props.submission.url}</span>
             </Link>
           </Text>
         </Flex.Item>

@@ -322,8 +322,7 @@ describe "grades" do
     it "should not display rubric on muted assignment", priority: "1", test_id: 229662 do
       StudentGradesPage.visit_as_student(@course)
 
-      @first_assignment.muted = true
-      @first_assignment.save!
+      @first_assignment.mute!
       StudentGradesPage.visit_as_student(@course)
 
       expect(f("#submission_#{@first_assignment.id} .toggle_rubric_assessments_link")).not_to be_displayed
@@ -339,8 +338,9 @@ describe "grades" do
         submission_types: 'online_text_entry',
         assignment_group: @group,
         grading_type: 'letter_grade',
-        muted: 'true'
+        muted: true
       })
+      @another_assignment.ensure_post_policy(post_manually: true)
       @another_submission = @another_assignment.submit_homework(@student_1, body: 'student second submission')
       @another_assignment.grade_student(@student_1, grade: 81, grader: @teacher)
       @another_submission.save!
@@ -379,7 +379,7 @@ describe "grades" do
         @first_assignment.grade_student(s, grade: 4, grader: @teacher)
       end
       # but then prevent them at the course levels
-      @course.update_attributes(hide_distribution_graphs: true)
+      @course.update(hide_distribution_graphs: true)
 
       StudentGradesPage.visit_as_student(@course)
       expect(f("#content")).not_to contain_css("#grade_info_#{@first_assignment.id} .tooltip")

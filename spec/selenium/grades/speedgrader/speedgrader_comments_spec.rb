@@ -474,4 +474,3 @@ describe "speed grader" do
     end
   end
 end
-

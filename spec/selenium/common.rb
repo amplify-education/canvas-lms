@@ -66,12 +66,11 @@ module SeleniumErrorRecovery
       # no sense trying anymore, give up and hope that other nodes pick up the slack
       puts "Error: got `#{exception}`, aborting"
       RSpec.world.wants_to_quit = true
-    when EOFError, Errno::ECONNREFUSED, Net::ReadTimeout
+    when EOFError, Errno::ECONNREFUSED, Net::ReadTimeout, Selenium::WebDriver::Error::UnknownError
       return false if SeleniumDriverSetup.saucelabs_test_run?
       return false if RSpec.world.wants_to_quit
-      return false unless exception.backtrace.grep(/selenium-webdriver/).present?
+      return false if exception.backtrace.grep(/selenium-webdriver/).blank?
 
-      puts "SELENIUM: webdriver is misbehaving.  Will try to re-initialize."
       SeleniumDriverSetup.reset!
       return true
     end
@@ -89,7 +88,8 @@ if defined?(TestQueue::Runner::RSpec::LazyGroups)
 else
   RSpec.configure do |config|
     config.before :suite do
-      SeleniumDriverSetup.run
+      # For flakey spec catcher: if server and driver are already initialized, reuse instead of starting another instance
+      SeleniumDriverSetup.run unless SeleniumDriverSetup.server.present? && SeleniumDriverSetup.driver.present?
     end
   end
 end
@@ -262,9 +262,11 @@ shared_context "in-process server selenium tests" do
         "Unexpected end of JSON input",
         "The google.com/jsapi JavaScript loader is deprecat",
         "Uncaught Error: Not Found", # for canvas-rce when no backend is set up
+        "Uncaught Error: Minified React error #188",
         "Uncaught Error: Minified React error #200", # this is coming from canvas-rce, but we should fix it
         "Access to Font at 'http://cdnjs.cloudflare.com/ajax/libs/mathjax/",
-        "Access to XMLHttpRequest at 'http://www.example.com/' from origin"
+        "Access to XMLHttpRequest at 'http://www.example.com/' from origin",
+        "The user aborted a request" # The server doesn't respond fast enough sometimes and requests can be aborted. For example: when a closing a dialog.
       ].freeze
 
       javascript_errors = browser_logs.select do |e|

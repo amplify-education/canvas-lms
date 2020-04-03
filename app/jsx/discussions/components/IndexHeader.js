@@ -18,7 +18,7 @@
 
 import actions from '../actions'
 import {bindActionCreators} from 'redux'
-import {bool, func, string} from 'prop-types'
+import {bool, func, string, arrayOf} from 'prop-types'
 import {connect} from 'react-redux'
 import {debounce} from 'lodash'
 import I18n from 'i18n!discussions_v2'
@@ -29,10 +29,13 @@ import select from '../../shared/select'
 import {Button} from '@instructure/ui-buttons'
 import DiscussionSettings from './DiscussionSettings'
 import {FormField} from '@instructure/ui-form-field'
-import {Grid, View} from '@instructure/ui-layout'
+import {Flex, View} from '@instructure/ui-layout'
 import {IconPlusLine, IconSearchLine} from '@instructure/ui-icons'
 import {PresentationContent, ScreenReaderContent} from '@instructure/ui-a11y'
 import {TextInput} from '@instructure/ui-forms'
+import ReactDOM from 'react-dom'
+import ContentTypeExternalToolTray from 'jsx/shared/ContentTypeExternalToolTray'
+import {ltiState} from '../../../../public/javascripts/lti/post_message/handleLtiPostMessage'
 
 const filters = {
   all: I18n.t('All'),
@@ -46,6 +49,7 @@ export default class IndexHeader extends Component {
     contextId: string.isRequired,
     contextType: string.isRequired,
     courseSettings: propTypes.courseSettings,
+    discussionTopicIndexMenuTools: arrayOf(propTypes.discussionTopicMenuTools),
     fetchCourseSettings: func.isRequired,
     fetchUserSettings: func.isRequired,
     isSavingSettings: bool.isRequired,
@@ -88,73 +92,139 @@ export default class IndexHeader extends Component {
     trailing: true
   })
 
+  renderTrayToolsMenu = () => {
+    if (this.props.discussionTopicIndexMenuTools?.length > 0) {
+      return (
+        <div className="inline-block">
+          <a
+            className="al-trigger btn"
+            id="discussion_menu_link"
+            role="button"
+            tabIndex="0"
+            title={I18n.t('Discussions Menu')}
+            aria-label={I18n.t('Discussions Menu')}
+          >
+            <i className="icon-more" aria-hidden="true" />
+            <span className="screenreader-only">{I18n.t('Discussions Menu')}</span>
+          </a>
+          <ul className="al-options" role="menu">
+            {this.props.discussionTopicIndexMenuTools.map(tool => (
+              <li key={tool.id} role="menuitem">
+                <a aria-label={tool.title} href="#" onClick={this.onLaunchTrayTool(tool)}>
+                  {this.iconForTrayTool(tool)}
+                  {tool.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+          <div id="external-tool-mount-point" />
+        </div>
+      )
+    }
+  }
+
+  iconForTrayTool(tool) {
+    if (tool.canvas_icon_class) {
+      return <i className={tool.canvas_icon_class} />
+    } else if (tool.icon_url) {
+      return <img className="icon" alt="" src={tool.icon_url} />
+    }
+  }
+
+  onLaunchTrayTool = tool => e => {
+    if (e != null) {
+      e.preventDefault()
+    }
+    this.setExternalToolTray(tool, document.getElementById('discussion_settings'))
+  }
+
+  setExternalToolTray(tool, returnFocusTo) {
+    const handleDismiss = () => {
+      this.setExternalToolTray(null)
+      returnFocusTo.focus()
+      if (ltiState?.tray?.refreshOnClose) {
+        window.location.reload()
+      }
+    }
+    ReactDOM.render(
+      <ContentTypeExternalToolTray
+        tool={tool}
+        placement="discussion_topic_index_menu"
+        acceptedResourceTypes={['discussion_topic']}
+        targetResourceType="discussion_topic"
+        allowItemSelection={false}
+        selectableItems={[]}
+        onDismiss={handleDismiss}
+        open={tool !== null}
+      />,
+      document.getElementById('external-tool-mount-point')
+    )
+  }
+
   render() {
     return (
-      <View>
-        <View display="block">
-          <Grid>
-            <Grid.Row hAlign="space-between">
-              <Grid.Col width={2}>
-                <FormField
-                  id="discussion-filter"
-                  label={<ScreenReaderContent>{I18n.t('Discussion Filter')}</ScreenReaderContent>}
-                >
-                  <select
-                    name="filter-dropdown"
-                    onChange={this.onFilterChange}
-                    style={{
-                      margin: '0',
-                      width: '100%'
-                    }}
-                  >
-                    {Object.keys(filters).map(filter => (
-                      <option key={filter} value={filter}>
-                        {filters[filter]}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-              </Grid.Col>
-              <Grid.Col width={4}>
-                <TextInput
-                  label={
-                    <ScreenReaderContent>
-                      {I18n.t('Search discussion by title')}
-                    </ScreenReaderContent>
-                  }
-                  placeholder={I18n.t('Search by title or author...')}
-                  icon={() => <IconSearchLine />}
-                  onChange={this.onSearchStringChange}
-                  name="discussion_search"
-                />
-              </Grid.Col>
-              <Grid.Col width={6} textAlign="end">
-                {this.props.permissions.create && (
-                  <Button
-                    href={`/${this.props.contextType}s/${this.props.contextId}/discussion_topics/new`}
-                    variant="primary"
-                    id="add_discussion"
-                  >
-                    <IconPlusLine />
-                    <ScreenReaderContent>{I18n.t('Add discussion')}</ScreenReaderContent>
-                    <PresentationContent>{I18n.t('Discussion')}</PresentationContent>
-                  </Button>
-                )}
-                {Object.keys(this.props.userSettings).length ? (
-                  <DiscussionSettings
-                    courseSettings={this.props.courseSettings}
-                    userSettings={this.props.userSettings}
-                    permissions={this.props.permissions}
-                    saveSettings={this.props.saveSettings}
-                    toggleModalOpen={this.props.toggleModalOpen}
-                    isSettingsModalOpen={this.props.isSettingsModalOpen}
-                    isSavingSettings={this.props.isSavingSettings}
-                  />
-                ) : null}
-              </Grid.Col>
-            </Grid.Row>
-          </Grid>
-        </View>
+      <View display="block">
+        <Flex wrapItems wrap="wrap" justifyItems="end">
+          <Flex.Item grow>
+            <FormField
+              id="discussion-filter"
+              label={<ScreenReaderContent>{I18n.t('Discussion Filter')}</ScreenReaderContent>}
+            >
+              <select
+                name="filter-dropdown"
+                onChange={this.onFilterChange}
+                style={{
+                  margin: '0',
+                  width: '100%'
+                }}
+              >
+                {Object.keys(filters).map(filter => (
+                  <option key={filter} value={filter}>
+                    {filters[filter]}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </Flex.Item>
+          <Flex.Item grow margin="0 0 0 small">
+            <TextInput
+              label={
+                <ScreenReaderContent>{I18n.t('Search discussion by title')}</ScreenReaderContent>
+              }
+              placeholder={I18n.t('Search by title or author...')}
+              icon={() => <IconSearchLine />}
+              onChange={this.onSearchStringChange}
+              name="discussion_search"
+            />
+          </Flex.Item>
+          <Flex.Item margin="0 0 0 small">
+            {this.props.permissions.create && (
+              <Button
+                href={`/${this.props.contextType}s/${this.props.contextId}/discussion_topics/new`}
+                variant="primary"
+                id="add_discussion"
+              >
+                <IconPlusLine />
+                <ScreenReaderContent>{I18n.t('Add discussion')}</ScreenReaderContent>
+                <PresentationContent>{I18n.t('Discussion')}</PresentationContent>
+              </Button>
+            )}
+            &nbsp;
+            {Object.keys(this.props.userSettings).length ? (
+              <DiscussionSettings
+                courseSettings={this.props.courseSettings}
+                userSettings={this.props.userSettings}
+                permissions={this.props.permissions}
+                saveSettings={this.props.saveSettings}
+                toggleModalOpen={this.props.toggleModalOpen}
+                isSettingsModalOpen={this.props.isSettingsModalOpen}
+                isSavingSettings={this.props.isSavingSettings}
+              />
+            ) : null}
+            &nbsp;
+            {this.renderTrayToolsMenu()}
+          </Flex.Item>
+        </Flex>
       </View>
     )
   }
@@ -164,6 +234,7 @@ const connectState = state => ({
   ...select(state, [
     'contextType',
     'contextId',
+    'discussionTopicIndexMenuTools',
     'permissions',
     'userSettings',
     'courseSettings',
@@ -179,7 +250,4 @@ const selectedActions = [
   'toggleModalOpen'
 ]
 const connectActions = dispatch => bindActionCreators(select(actions, selectedActions), dispatch)
-export const ConnectedIndexHeader = connect(
-  connectState,
-  connectActions
-)(IndexHeader)
+export const ConnectedIndexHeader = connect(connectState, connectActions)(IndexHeader)

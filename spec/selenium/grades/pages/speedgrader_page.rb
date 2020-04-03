@@ -83,10 +83,6 @@ class Speedgrader
       fxpath('//ul[@role = "menu"]//span[text() = "Keyboard Shortcuts"]')
     end
 
-    def mute_button
-      f('button#mute_link')
-    end
-
     def post_or_hide_grades_button
       fj('button[title="Post or Hide Grades"]:visible')
     end
@@ -97,6 +93,10 @@ class Speedgrader
 
     def post_grades_link
       fj("[role=menuitem]:contains('Post Grades'):visible")
+    end
+
+    def no_grades_to_post_button
+      fj("[role=menuitem]:contains('No Grades to Post'):visible")
     end
 
     def all_grades_posted_link
@@ -324,7 +324,7 @@ class Speedgrader
     def visit(course_id, assignment_id, timeout = 10)
       get "/courses/#{course_id}/gradebook/speed_grader?assignment_id=#{assignment_id}"
       visibility_check = grade_input
-      keep_trying_until(timeout) { visibility_check.displayed? }
+      wait_for(method: :visit, timeout: timeout) { visibility_check.displayed? }
     end
 
     def select_provisional_grade_by_label(label)

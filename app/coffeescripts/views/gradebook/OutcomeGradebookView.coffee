@@ -14,20 +14,27 @@
 #
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
+#
 
 import I18n from 'i18n!gradebookOutcomeGradebookView'
 import $ from 'jquery'
 import _ from 'underscore'
+import React from 'react'
+import ReactDOM from 'react-dom'
 import {View} from 'Backbone'
+
+import htmlEscape from 'str/htmlEscape'
 import Slick from 'vendor/slickgrid'
 import Grid from '../../gradebook/OutcomeGradebookGrid'
 import userSettings from '../../userSettings'
 import CheckboxView from './CheckboxView'
-import SectionMenuView from './SectionMenuView'
+import SectionMenuView from '../gradebook/SectionMenuView'
+import SectionFilter from 'jsx/gradebook/default_gradebook/components/content-filters/SectionFilter'
 import template from 'jst/gradebook/outcome_gradebook'
 import 'vendor/jquery.ba-tinypubsub'
 import '../../jquery.rails_flash_notifications'
 import 'jquery.instructure_misc_plugins'
+import 'jquery.disableWhileLoading'
 
 Dictionary =
   exceedsMastery:
@@ -47,13 +54,11 @@ export default class OutcomeGradebookView extends View
 
     tagName: 'div'
 
-    className: 'outcome-gradebook-container'
+    className: 'outcome-gradebook'
 
     template: template
 
-    @optionProperty 'gradebook'
-
-    @optionProperty 'router'
+    @optionProperty 'learningMastery'
 
     hasOutcomes: $.Deferred()
 
@@ -80,6 +85,10 @@ export default class OutcomeGradebookView extends View
       if ENV.GRADEBOOK_OPTIONS.outcome_proficiency?.ratings
         @ratings = ENV.GRADEBOOK_OPTIONS.outcome_proficiency.ratings
         @checkboxes = @ratings.map (rating) -> new CheckboxView({color: "\##{rating.color}", label: rating.description})
+
+    remove: ->
+      super()
+      ReactDOM.unmountComponentAtNode(document.querySelector('[data-component="SectionFilter"]'))
 
     # Public: Show/hide the sidebar.
     #
@@ -127,8 +136,8 @@ export default class OutcomeGradebookView extends View
     # options - The options hash passed to the constructor function.
     #
     # Returns nothing on success, raises on failure.
-    _validateOptions: ({gradebook}) ->
-      throw new Error('Missing required option: "gradebook"') unless gradebook
+    _validateOptions: ({learningMastery}) ->
+      throw new Error('Missing required option: "learningMastery"') unless learningMastery
 
     # Internal: Listen for events on child views.
     #
@@ -136,12 +145,7 @@ export default class OutcomeGradebookView extends View
     _attachEvents: ->
       _this = @
       view.on('togglestate', @_createFilter("rating_#{i}")) for view, i in @checkboxes
-      $.subscribe('currentSection/change', (section) ->
-        Grid.section = section
-        _this._rerender()
-      )
-      $.subscribe('currentSection/change', @updateExportLink)
-      @updateExportLink(@gradebook.sectionToShow)
+      @updateExportLink(@learningMastery.getCurrentSectionId())
       @$('#no_results_outcomes').change(() -> _this._toggleOutcomesWithNoResults(this.checked))
       @$('#no_results_students').change(() -> _this._toggleStudentsWithNoResults(this.checked))
 
@@ -207,9 +211,8 @@ export default class OutcomeGradebookView extends View
     #
     # Returns this.
     render: ->
-      $.when(@gradebook.hasSections)
-        .then(=> super)
-        .then(@_drawSectionMenu)
+      super()
+      @renderSectionMenu()
       $.when(@hasOutcomes).then(@renderGrid)
       this
 
@@ -224,7 +227,8 @@ export default class OutcomeGradebookView extends View
       Grid.Util.saveOutcomes(response.linked.outcomes)
       Grid.Util.saveStudents(response.linked.users)
       Grid.Util.saveOutcomePaths(response.linked.outcome_paths)
-      Grid.Util.saveSections(@gradebook.sections) # might want to put these into the api results at some point
+      sections = @learningMastery.getSections().map(htmlEscape)
+      Grid.Util.saveSections(sections)
       [columns, rows] = Grid.Util.toGrid(response, column: { formatter: Grid.View.cell })
       @columns = columns
       if @$('#no_results_outcomes:checkbox:checked').length == 1
@@ -243,6 +247,7 @@ export default class OutcomeGradebookView extends View
         @grid.init()
         Grid.Events.init(@grid)
         @_attachEvents()
+        Grid.section = @learningMastery.getCurrentSectionId()
         Grid.View.redrawHeader(@grid,  Grid.averageFn)
 
     isLoaded: false
@@ -255,7 +260,6 @@ export default class OutcomeGradebookView extends View
       })
       $(".post-grades-button-placeholder").hide();
 
-
     # Public: Load a specific result page
     #
     # Returns nothing.
@@ -264,11 +268,35 @@ export default class OutcomeGradebookView extends View
       $.when(@hasOutcomes).then(@renderGrid)
       @_loadOutcomes(page)
 
+    # Internal: Render Section selector.
+    # Returns nothing.
+    renderSectionMenu: =>
+      sectionList = @learningMastery.getSections()
+      mountPoint = document.querySelector('[data-component="SectionFilter"]')
+      if sectionList.length > 1
+        selectedSectionId = @learningMastery.getCurrentSectionId() || '0'
+        Grid.section = selectedSectionId
+        props =
+          sections: sectionList
+          onSelect: @updateCurrentSection
+          selectedSectionId: selectedSectionId
+          disabled: false
+
+        component = React.createElement(SectionFilter, props)
+        @sectionFilterMenu = ReactDOM.render(component, mountPoint)
+
+    updateCurrentSection: (sectionId) =>
+      @learningMastery.updateCurrentSectionId(sectionId)
+      Grid.section = sectionId
+      @_rerender()
+      @updateExportLink(sectionId)
+      @renderSectionMenu()
+
     # Public: Load all outcome results from API.
     #
     # Returns nothing.
     loadOutcomes: () ->
-      $.when(@gradebook.hasSections).then(@_loadOutcomes)
+      @_loadOutcomes()
 
     _rollupsUrl: (course, exclude, page) ->
       excluding = if exclude == '' then '' else "&exclude[]=#{exclude}"
@@ -278,7 +306,7 @@ export default class OutcomeGradebookView extends View
       sortParams = "&sort_by=#{sortField}"
       sortParams = "#{sortParams}&sort_outcome_id=#{sortOutcomeId}" if sortOutcomeId
       sortParams = "#{sortParams}&sort_order=desc" if !@sortOrderAsc
-      sectionParam = if Grid.section then "&section_id=#{Grid.section}" else ""
+      sectionParam = if Grid.section and Grid.section != "0" then "&section_id=#{Grid.section}" else ""
       "/api/v1/courses/#{course}/outcome_rollups?rating_percents=true&per_page=20&include[]=outcomes&include[]=users&include[]=outcome_paths#{excluding}&page=#{page}#{sortParams}#{sectionParam}"
 
     _loadOutcomes: (page = 1) =>
@@ -300,7 +328,7 @@ export default class OutcomeGradebookView extends View
       dfd.then (response, status, xhr) =>
         outcomes = @_mergeResponses(outcomes, response)
         @hasOutcomes.resolve(outcomes)
-        @router.renderPagination(
+        @learningMastery.renderPagination(
           response.meta.pagination.page,
           response.meta.pagination.page_count
         )
@@ -323,19 +351,6 @@ export default class OutcomeGradebookView extends View
       response.rollups = a.rollups.concat(b.rollups)
       response
 
-    # Internal: Initialize the child SectionMenuView. This happens here because
-    #   the menu needs to wait for relevant course sections to load.
-    #
-    # Returns nothing.
-    _drawSectionMenu: =>
-      @menu = new SectionMenuView(
-        sections: @gradebook.sectionList()
-        currentSection: @gradebook.sectionToShow
-        el: $('.section-button-placeholder'),
-      )
-      @menu.render()
-      Grid.section = @menu.currentSection
-
     # Internal: Create an event listener function used to filter SlickGrid results.
     #
     # name - The class name to toggle on/off (e.g. 'mastery', 'remedial').
@@ -351,5 +366,5 @@ export default class OutcomeGradebookView extends View
 
     updateExportLink: (section) =>
       url = "#{ENV.GRADEBOOK_OPTIONS.context_url}/outcome_rollups.csv"
-      url += "?section_id=#{section}" if section
+      url += "?section_id=#{section}" if section and section != '0'
       $('.export-content').attr('href', url)

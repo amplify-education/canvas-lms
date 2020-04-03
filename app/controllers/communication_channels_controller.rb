@@ -164,8 +164,11 @@ class CommunicationChannelsController < ApplicationController
         return render :json => { errors: { type: 'SNS is not configured for this developer key'}}, status: :bad_request
       end
 
-      endpoint = @current_user.notification_endpoints.where("lower(token) = ?", params[:communication_channel][:token].downcase).first
-      endpoint ||= @access_token.notification_endpoints.create!(token: params[:communication_channel][:token])
+      NotificationEndpoint.unique_constraint_retry do
+        unless @current_user.notification_endpoints.where("lower(token) = lower(?)", params[:communication_channel][:token]).exists?
+          @access_token.notification_endpoints.create!(token: params[:communication_channel][:token])
+        end
+      end
 
       skip_confirmation = true
       params[:build_pseudonym] = nil
@@ -215,6 +218,10 @@ class CommunicationChannelsController < ApplicationController
   def confirm
     @nonce = params[:nonce]
     cc = CommunicationChannel.unretired.where('path_type != ?', CommunicationChannel::TYPE_PUSH).find_by_confirmation_code(@nonce)
+
+    # See if we can find it cross shard if it wasn't found on this shard
+    cc ||= @current_user && @current_user.communication_channels.unretired.where('path_type != ?', CommunicationChannel::TYPE_PUSH).find_by_confirmation_code(@nonce)
+
     @headers = false
     if cc && cc.path_type == 'email' && !EmailAddressValidator.valid?(cc.path)
       failed = true
@@ -294,7 +301,7 @@ class CommunicationChannelsController < ApplicationController
           @current_user.transaction do
             cc.confirm
             @enrollment.accept if @enrollment
-            UserMerge.from(@user).into(@current_user) if @user != @current_user
+            UserMerge.from(@user).into(@current_user, merger: @current_user, source: 'cc_confirmation') if @user != @current_user
             # create a new pseudonym if necessary and possible
             pseudonym = @current_user.find_or_initialize_pseudonym_for_account(@root_account, @domain_root_account)
             pseudonym.save! if pseudonym && pseudonym.changed?

@@ -21,12 +21,6 @@ begin
 rescue LoadError
 end
 
-if ENV['KNAPSACK_ENABLED'] == '1'
-  puts "DEBUGGING FOR KNAPSACK: rspec run with args: #{ARGV}"
-  require 'knapsack'
-  Knapsack::Adapters::RSpecAdapter.bind
-end
-
 require 'securerandom'
 require 'tmpdir'
 
@@ -208,7 +202,6 @@ module RenderWithHelpers
 end
 RSpec::Rails::ViewExampleGroup::ExampleMethods.prepend(RenderWithHelpers)
 
-require 'action_controller_test_process'
 require_relative 'rspec_mock_extensions'
 require File.expand_path(File.dirname(__FILE__) + '/ams_spec_helper')
 
@@ -900,7 +893,16 @@ RSpec.configure do |config|
   end
 
   def skip_if_prepended_class_method_stubs_broken
-    skip("stubbing prepended class methods is broken in this version of ruby") if %w{2.4.6 2.5.1 2.5.3 2.6.0 2.6.2}.include?(RUBY_VERSION)
+    versions = [
+      '2.4.6',
+      '2.4.9',
+      '2.5.1',
+      '2.5.3',
+      '2.6.0',
+      '2.6.2',
+      '2.6.5'
+    ]
+    skip("stubbing prepended class methods is broken in this version of ruby") if versions.include?(RUBY_VERSION)
   end
 end
 

@@ -291,12 +291,9 @@ describe "people" do
       get "/courses/#{@course.id}/users"
       create_student_group
       fj('.group-category-actions:visible a:visible').click
+      wait_for(method: nil, timeout: 2) { f('.delete-category').displayed? } # simple wait for option to be visible
       f('.delete-category').click
-      keep_trying_until do
-        expect(driver.switch_to.alert).not_to be_nil
-        driver.switch_to.alert.accept
-        true
-      end
+      accept_alert
       wait_for_ajaximations
       refresh_page
       expect(f('.empty-groupset-instructions')).to be_displayed
@@ -366,7 +363,6 @@ describe "people" do
   end
 
   context "people as a TA" do
-
     before :once do
       course_with_ta(:active_all => true)
     end
@@ -400,6 +396,45 @@ describe "people" do
       get "/courses/#{@course.id}/users"
       index = ff('table.roster th').map(&:text).find_index('Login ID')
       expect(index).to be_nil
+    end
+
+    context "without view all grades permissions" do
+      before(:each) do
+        ['view_all_grades', 'manage_grades'].each do |permission|
+          RoleOverride.create!(permission: permission, enabled: false, context: @course.account, role: ta_role)
+        end
+      end
+
+      it "doesn't show the Interactions Report link without view all grades permissions" do
+        @student = create_user('student@test.com')
+        enroll_student(@student)
+        get "/courses/#{@course.id}/users/#{@student.id}"
+        expect(f("#content")).not_to contain_link("Interactions Report")
+      end
+
+      it "doesn't show the Student Interactions Report link without view all grades permissions" do
+        get "/courses/#{@course.id}/users/#{@ta.id}"
+        expect(f("#content")).not_to contain_link("Student Interactions Report")
+      end
+
+      context "with new profile flag enabled" do
+        before(:each) do
+          @course.account.settings[:enable_profiles] = true
+          @course.account.save!
+          @student = create_user('student@test.com')
+          enroll_student(@student)
+        end
+
+        it "doesn't show the Interactions Report link without permissions" do
+          get "/courses/#{@course.id}/users/#{@student.id}"
+          expect(f("#content")).not_to contain_link("Interactions Report")
+        end
+
+        it "doesn't show the Student Interactions Report link without permissions" do
+          get "/courses/#{@course.id}/users/#{@ta.id}"
+          expect(f("#content")).not_to contain_link("Student Interactions Report")
+        end
+      end
     end
   end
 

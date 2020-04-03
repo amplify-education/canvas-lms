@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import I18n from 'i18n!assignments_2_thing'
+import I18n from 'i18n!a2LatePolicyStatusDisplay'
 import PropTypes from 'prop-types'
 import React from 'react'
 import {Tooltip} from '@instructure/ui-overlays'
@@ -25,7 +25,7 @@ import {Text} from '@instructure/ui-elements'
 import LatePolicyToolTipContent from './LatePolicyToolTipContent'
 import {ScreenReaderContent} from '@instructure/ui-a11y'
 
-function LatePolicyStatusDisplay(props) {
+export default function LatePolicyStatusDisplay(props) {
   // TODO: actually pass the assignment and submission in here instead of all these
   //       separate props
   const {attempt, gradingType, grade, originalGrade, pointsDeducted, pointsPossible} = props
@@ -80,4 +80,3 @@ LatePolicyStatusDisplay.propTypes = {
   pointsPossible: PropTypes.number.isRequired
 }
 
-export default React.memo(LatePolicyStatusDisplay)

@@ -469,6 +469,7 @@ class Quizzes::Quiz < ActiveRecord::Base
   def clear_availability_cache
     if self.should_clear_availability_cache && !self.saved_by == :migration
       self.clear_cache_key(:availability)
+      self.assignment.clear_cache_key(:availability) if self.assignment
     end
   end
 
@@ -1173,18 +1174,6 @@ class Quizzes::Quiz < ActiveRecord::Base
     context.teacher_enrollments.map(&:user)
   end
 
-  def migrate_file_links
-    Quizzes::QuizQuestionLinkMigrator.migrate_file_links_in_quiz(self)
-  end
-
-  def self.batch_migrate_file_links(ids)
-    Quizzes::Quiz.where(:id => ids).each do |quiz|
-      if quiz.migrate_file_links
-        quiz.save
-      end
-    end
-  end
-
   def self.lockdown_browser_plugin_enabled?
     Canvas::Plugin.all_for_tag(:lockdown_browser).any? { |p| Canvas::Plugin.value_to_boolean(p.settings[:enabled]) }
   end
@@ -1440,7 +1429,10 @@ class Quizzes::Quiz < ActiveRecord::Base
   def run_if_overrides_changed!
     self.relock_modules!
     self.clear_cache_key(:availability)
-    self.assignment.relock_modules! if self.assignment
+    if self.assignment
+      self.assignment.clear_cache_key(:availability)
+      self.assignment.relock_modules!
+    end
   end
 
   # Assignment#run_if_overrides_changed_later! uses its keyword arguments, but

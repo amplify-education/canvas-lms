@@ -77,6 +77,7 @@ describe "Notifications" do
         @assignment.peer_reviews = true
         @assignment.anonymous_peer_reviews = true
         @assignment.save!
+        @assignment.unmute!
 
         setup_notification(@student, name: 'Submission Comment')
 

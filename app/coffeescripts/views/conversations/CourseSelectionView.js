@@ -76,8 +76,11 @@ export default class CourseSelectionView extends View {
       defaultOption: this.options.defaultOption,
       favorites: this.options.courses.favorites.toJSON(),
       more,
-      concluded,
       groups: group_json
+    }
+
+    if (!this.options.excludeConcluded) {
+      data.concluded = concluded
     }
 
     this.truncate_course_name_data(data)
@@ -107,11 +110,12 @@ export default class CourseSelectionView extends View {
   }
 
   loadAll() {
-    const {all} = this.options.courses
+    const {all, groups} = this.options.courses
     if (all._loading) return
     all.fetch()
     all._loading = true
-    this.options.courses.groups.fetchAll()
+
+    groups.fetchAll()
     return this.$picker.find('> .dropdown-menu').append(
       $('<div />')
         .attr('class', 'paginatedLoadingIndicator')

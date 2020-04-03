@@ -138,6 +138,7 @@ class Account < ActiveRecord::Base
   validates :workflow_state, presence: true
   validate :no_active_courses, if: lambda { |a| a.workflow_state_changed? && !a.active? }
   validate :no_active_sub_accounts, if: lambda { |a| a.workflow_state_changed? && !a.active? }
+  validate :validate_help_links, if: lambda { |a| a.settings_changed? }
 
   include StickySisFields
   are_sis_sticky :name, :parent_account_id
@@ -149,10 +150,13 @@ class Account < ActiveRecord::Base
 
   def default_locale(recurse = false)
     result = read_attribute(:default_locale)
-    if recurse
-      result ||= Rails.cache.fetch(['default_locale', self.global_id].cache_key) do
-        parent_account.default_locale(true) if parent_account
+    if recurse && !result && parent_account
+      unless instance_variable_defined?(:@cached_parent_locale)
+        @cached_parent_locale = Rails.cache.fetch(['default_locale', self.global_id].cache_key) do
+          parent_account.default_locale(true)
+        end
       end
+      result = @cached_parent_locale
     end
     result = nil unless I18n.locale_available?(result)
     result
@@ -252,6 +256,7 @@ class Account < ActiveRecord::Base
 
   add_setting :enable_course_catalog, :boolean => true, :root_only => true, :default => false
   add_setting :usage_rights_required, :boolean => true, :default => false, :inheritable => true
+  add_setting :limit_parent_app_web_access, boolean: true, default: false
 
 
   def settings=(hash)
@@ -763,7 +768,8 @@ class Account < ActiveRecord::Base
     end
 
     if starting_account_id
-      Shackles.activate(:slave) do
+      shackles_env = Account.connection.open_transactions == 0 ? :slave : Shackles.environment
+      Shackles.activate(shackles_env) do
         chain.concat(Shard.shard_for(starting_account_id).activate do
           Account.find_by_sql(<<-SQL)
                 WITH RECURSIVE t AS (
@@ -1131,9 +1137,12 @@ class Account < ActiveRecord::Base
 
   alias_method :destroy_permanently!, :destroy
   def destroy
-    self.workflow_state = 'deleted'
-    self.deleted_at = Time.now.utc
-    save!
+    self.transaction do
+      self.account_users.update_all(workflow_state: 'deleted')
+      self.workflow_state = 'deleted'
+      self.deleted_at = Time.now.utc
+      save!
+    end
   end
 
   def to_atom
@@ -1216,6 +1225,15 @@ class Account < ActiveRecord::Base
       self.auth_discovery_url = value
     rescue URI::Error, ArgumentError
       errors.add(:discovery_url, t('errors.invalid_discovery_url', "The discovery URL is not valid" ))
+    end
+  end
+
+  def validate_help_links
+    links = self.settings[:custom_help_links]
+    return if links.blank?
+    link_errors = HelpLinks.validate_links(links)
+    link_errors.each do |link_error|
+      errors.add(:custom_help_links, link_error)
     end
   end
 
@@ -1463,6 +1481,7 @@ class Account < ActiveRecord::Base
   TAB_ADMIN_TOOLS = 17
   TAB_SEARCH = 18
   TAB_BRAND_CONFIGS = 19
+  TAB_EPORTFOLIO_MODERATION = 20
 
   # site admin tabs
   TAB_PLUGINS = 14
@@ -1493,6 +1512,8 @@ class Account < ActiveRecord::Base
       tabs << { :id => TAB_PERMISSIONS, :label => t('#account.tab_permissions', "Permissions"), :css_class => 'permissions', :href => :account_permissions_path } if user && self.grants_right?(user, :manage_role_overrides)
       if user && self.grants_right?(user, :manage_outcomes)
         tabs << { :id => TAB_OUTCOMES, :label => t('#account.tab_outcomes', "Outcomes"), :css_class => 'outcomes', :href => :account_outcomes_path }
+      end
+      if self.can_see_rubrics_tab?(user)
         tabs << { :id => TAB_RUBRICS, :label => t('#account.tab_rubrics', "Rubrics"), :css_class => 'rubrics', :href => :account_rubrics_path }
       end
       tabs << { :id => TAB_GRADING_STANDARDS, :label => t('#account.tab_grading_standards', "Grading"), :css_class => 'grading_standards', :href => :account_grading_standards_path } if user && self.grants_right?(user, :manage_grades)
@@ -1516,9 +1537,25 @@ class Account < ActiveRecord::Base
     tabs += external_tool_tabs(opts, user)
     tabs += Lti::MessageHandler.lti_apps_tabs(self, [Lti::ResourcePlacement::ACCOUNT_NAVIGATION], opts)
     tabs << { :id => TAB_ADMIN_TOOLS, :label => t('#account.tab_admin_tools', "Admin Tools"), :css_class => 'admin_tools', :href => :account_admin_tools_path } if can_see_admin_tools_tab?(user)
+    if user && grants_right?(user, :moderate_user_content) && root_account.feature_enabled?(:eportfolio_moderation)
+      tabs << {
+        id: TAB_EPORTFOLIO_MODERATION,
+        label: t("ePortfolio Moderation"),
+        css_class: "eportfolio_moderation",
+        href: :account_eportfolio_moderation_path
+      }
+    end
     tabs << { :id => TAB_SETTINGS, :label => t('#account.tab_settings', "Settings"), :css_class => 'settings', :href => :account_settings_path }
     tabs.delete_if{ |t| t[:visibility] == 'admins' } unless self.grants_right?(user, :manage)
     tabs
+  end
+
+  def can_see_rubrics_tab?(user)
+    if root_account.feature_enabled?(:decouple_rubrics)
+      user && self.grants_right?(user, :manage_rubrics)
+    else
+      user && self.grants_right?(user, :manage_outcomes)
+    end
   end
 
   def can_see_admin_tools_tab?(user)
@@ -1553,7 +1590,8 @@ class Account < ActiveRecord::Base
     else
       help_links_builder.default_links + (links || [])
     end
-    help_links_builder.instantiate_links(result)
+    filtered_result = help_links_builder.filtered_links(result)
+    help_links_builder.instantiate_links(filtered_result)
   end
 
   def help_links_builder
@@ -1749,6 +1787,10 @@ class Account < ActiveRecord::Base
 
   def parent_registration_aac
     authentication_providers.where(parent_registration: true).first
+  end
+
+  def require_email_for_registration?
+    Canvas::Plugin.value_to_boolean(settings[:require_email_for_registration]) || false
   end
 
   def to_param

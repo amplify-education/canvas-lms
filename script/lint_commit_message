@@ -96,9 +96,17 @@ starts_with_spec = subject =~ /\Aspec: /i
 exit if starts_with_spec # we're trusting you here, don't be evil
 
 commit_files = git("show --pretty=format:"" --name-only").split("\n")
+puts "detected file changes"
+puts commit_files
 only_affects_specs = commit_files.all? { |f| f =~ %r{\Aspec/} }
 if only_affects_specs
   comment "warn", 1, "since your commit only affects specs, please prefix your commit message with \"spec: \""
+  exit
+end
+
+touches_db_migrate_file = commit_files.any? { |f| f =~ %r{\Adb\/migrate/}}
+if touches_db_migrate_file
+  comment "warn", 1, "Your commit modifies migration files. Please review and follow the instructions in https://instructure.atlassian.net/wiki/spaces/CE/pages/49643724/Rails+Migrations, including completing an additional migration review."
   exit
 end
 
@@ -123,6 +131,11 @@ if issue_ids.empty? && !gh_issue
   else
     comment "warn", 3, "you should really reference a ticket ლ(ٱ٥ٱლ)"
   end
+end
+
+flag_name = (commit_message =~ /^flag\s{0,3}=\s{0,3}([a-zA-Z][\w\-]+)\s{0,3}$/)
+unless flag_name
+  comment "warn", 1, "ლ(ಠ益ಠლ) y u no add release flag? https://instructure.atlassian.net/wiki/spaces/CE/pages/603586589/Commit+Message+Release+Flags"
 end
 
 has_a_test_plan = commit_message =~ /test[ -]plan/i

@@ -96,7 +96,7 @@ class CalendarEvent < ActiveRecord::Base
     @child_event_data.each do |data|
       if (event = current_events.delete(data[:context_code])&.first)
         event.updating_user = @updating_user
-        event.update_attributes(:start_at => data[:start_at], :end_at => data[:end_at])
+        event.update(:start_at => data[:start_at], :end_at => data[:end_at])
       else
         context = @child_event_contexts[data[:context_code]][0]
         event = child_events.build(:start_at => data[:start_at], :end_at => data[:end_at])
@@ -164,14 +164,19 @@ class CalendarEvent < ActiveRecord::Base
     SQL
   }
 
-  scope :not_hidden, -> {
-    where("NOT EXISTS (SELECT id FROM #{CalendarEvent.quoted_table_name} sub_events WHERE sub_events.parent_calendar_event_id=calendar_events.id)")
-  }
+  scope :not_hidden, -> do
+    where("NOT EXISTS (
+      SELECT id 
+      FROM #{CalendarEvent.quoted_table_name} sub_events
+      WHERE sub_events.parent_calendar_event_id=calendar_events.id
+        AND sub_events.workflow_state <> 'deleted'
+    )")
+  end
 
   scope :undated, -> { where(:start_at => nil, :end_at => nil) }
 
   scope :between, lambda { |start, ending| where(:start_at => start..ending) }
-  scope :current, -> { where("calendar_events.end_at>=?", Time.zone.now.midnight) }
+  scope :current, -> { where("calendar_events.end_at>=?", Time.zone.now) }
   scope :updated_after, lambda { |*args|
     if args.first
       where("calendar_events.updated_at IS NULL OR calendar_events.updated_at>?", args.first)
@@ -372,12 +377,21 @@ class CalendarEvent < ActiveRecord::Base
 
   has_a_broadcast_policy
 
+  def course_broadcast_data
+    if context.respond_to?(:broadcast_data)
+      context.broadcast_data
+    else
+      {}
+    end
+  end
+
   set_broadcast_policy do
     dispatch :new_event_created
     to { participants(include_observers: true) - [@updating_user] }
     whenever {
       !appointment_group && context.available? && just_created && !hidden?
     }
+    data { course_broadcast_data }
 
     dispatch :event_date_changed
     to { participants(include_observers: true) - [@updating_user] }
@@ -388,6 +402,7 @@ class CalendarEvent < ActiveRecord::Base
         changed_in_state(:active, :fields => :end_at)
       ) && !hidden?
     }
+    data { course_broadcast_data }
 
     dispatch :appointment_reserved_by_user
     to { appointment_group.instructors +
@@ -397,7 +412,7 @@ class CalendarEvent < ActiveRecord::Base
       just_created &&
       context == appointment_group.participant_for(@updating_user)
     }
-    data { {:updating_user_name => @updating_user.name} }
+    data { { updating_user_name: @updating_user.name }.merge(course_broadcast_data) }
 
     dispatch :appointment_canceled_by_user
     to { appointment_group.instructors +
@@ -409,10 +424,7 @@ class CalendarEvent < ActiveRecord::Base
       @updating_user &&
       context == appointment_group.participant_for(@updating_user)
     }
-    data { {
-      :updating_user_name => @updating_user.name,
-      :cancel_reason => @cancel_reason
-    } }
+    data { { updating_user_name: @updating_user.name, cancel_reason: @cancel_reason }.merge(course_broadcast_data) }
 
     dispatch :appointment_reserved_for_user
     to { participants(include_observers: true) - [@updating_user] }
@@ -420,7 +432,7 @@ class CalendarEvent < ActiveRecord::Base
       appointment_group && parent_event &&
       just_created
     }
-    data { {:updating_user_name => @updating_user.name} }
+    data { { updating_user_name: @updating_user.name }.merge(course_broadcast_data) }
 
     dispatch :appointment_deleted_for_user
     to { participants(include_observers: true) - [@updating_user] }
@@ -429,10 +441,7 @@ class CalendarEvent < ActiveRecord::Base
       deleted? &&
       saved_change_to_workflow_state?
     }
-    data { {
-      :updating_user_name => @updating_user.name,
-      :cancel_reason => @cancel_reason
-    } }
+    data { { updating_user_name: @updating_user.name, cancel_reason: @cancel_reason }.merge(course_broadcast_data) }
   end
 
   def participants(include_observers: false)

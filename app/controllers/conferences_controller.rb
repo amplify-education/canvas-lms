@@ -126,6 +126,14 @@
 #         "join_url": {
 #           "description": "URL to join the conference, may be null if the conference type doesn't set it",
 #           "type": "string"
+#         },
+#         "context_type": {
+#           "description": "The type of this conference's context, typically 'Course' or 'Group'.",
+#           "type": "string"
+#         },
+#         "context_id": {
+#           "description": "The ID of this conference's context.",
+#           "type": "integer"
 #         }
 #       }
 #     }
@@ -133,17 +141,19 @@
 class ConferencesController < ApplicationController
   include Api::V1::Conferences
 
-  before_action :require_context
+  before_action :require_context, except: :for_user
   skip_before_action :load_user, :only => [:recording_ready]
 
   add_crumb(proc{ t '#crumbs.conferences', "Conferences"}) do |c|
-    c.send(:named_context_url, c.instance_variable_get("@context"), :context_conferences_url)
+    if c.context.present?
+      c.send(:named_context_url, c.context, :context_conferences_url)
+    end
   end
 
   before_action { |c| c.active_tab = "conferences" }
   before_action :require_config
   before_action :reject_student_view_student
-  before_action :get_conference, :except => [:index, :create]
+  before_action :get_conference, :except => [:index, :create, :for_user]
 
   # @API List conferences
   # Retrieve the paginated list of conferences for this context
@@ -168,30 +178,112 @@ class ConferencesController < ApplicationController
       @context.web_conferences.active :
       @current_user.web_conferences.active.shard(@context.shard).where(context_type: @context.class.to_s, context_id: @context.id)
     conferences = conferences.with_config.order("created_at DESC, id DESC")
-    api_request? ? api_index(conferences) : web_index(conferences)
+    api_request? ? api_index(conferences, polymorphic_url([:api_v1, @context, :conferences])) : web_index(conferences)
   end
 
-  def api_index(conferences)
-    route = polymorphic_url([:api_v1, @context, :conferences])
+  module UserConferencesBookmarker
+    def self.bookmark_for(conference)
+      # We're sorting in descending order, so we need to "flip" our sort values
+      # to make sure a conference is ordered properly vis-a-vis its neighbors
+      [Time.zone.now - conference.created_at, -conference.id]
+    end
+
+    def self.validate(bookmark)
+      return false unless bookmark.is_a?(Array) && bookmark.length == 2
+      bookmark.first.is_a?(ActiveSupport::TimeWithZone) && bookmark.second.is_a?(Integer)
+    end
+
+    def self.restrict_scope(scope, pager)
+      if pager.current_bookmark
+        creation_date, id = pager.current_bookmark
+        comparison = pager.include_bookmark ? "<=" : "<"
+
+        scope = scope.where("ROW(created_at, id) #{comparison} ROW(?, ?)", creation_date, id)
+      end
+      scope.order("created_at DESC, id DESC")
+    end
+  end
+
+  # @API List conferences for the current user
+  # Retrieve the paginated list of conferences for all courses and groups
+  # the current user belongs to
+  #
+  # This API returns a JSON object containing the list of conferences.
+  # The key for the list of conferences is "conferences".
+  #
+  # @argument state [String]
+  #   If set to "live", returns only conferences that are live (i.e., have
+  #   started and not finished yet). If omitted, returns all conferences for
+  #   this user's groups and courses.
+  #
+  # @example_request
+  #     curl 'https://<canvas>/api/v1/conferences' \
+  #         -H "Authorization: Bearer <token>"
+  #
+  # @returns [Conference]
+  def for_user
+    return render_unauthorized_action unless @current_user
+
+    log_api_asset_access(["conferences"], "conferences", "other")
+
+    courses_collection = ShardedBookmarkedCollection.build(UserConferencesBookmarker, @current_user.enrollments) do |enrollments_scope|
+      conference_scope = WebConference.active.where(context_type: "Course", context_id: enrollments_scope.active.select(:course_id)).
+        where("EXISTS (?)", WebConferenceParticipant.where("web_conference_id = web_conferences.id AND user_id = ?", @current_user.id))
+      conference_scope = conference_scope.live if params[:state] == "live"
+      conference_scope.order("created_at DESC, id DESC")
+    end
+
+    groups_collection = ShardedBookmarkedCollection.build(UserConferencesBookmarker, @current_user.groups) do |groups_scope|
+      conference_scope = WebConference.active.where(context_type: "Group", context_id: groups_scope.active.select(:id)).
+        where("EXISTS (?)", WebConferenceParticipant.where("web_conference_id = web_conferences.id AND user_id = ?", @current_user.id))
+      conference_scope = conference_scope.live if params[:state] == "live"
+      conference_scope.order("created_at DESC, id DESC")
+    end
+
+    # ShardedBookmarkedCollection.build will return an ActiveRecord relation as
+    # a shortcut if it finds results on fewer than two shards. We still need to
+    # merge these two result sets, so re-wrap results in a bookmarked
+    # collection if needed.
+    courses_collection = BookmarkedCollection.wrap(UserConferencesBookmarker, courses_collection) if courses_collection.is_a?(ActiveRecord::Relation)
+    groups_collection = BookmarkedCollection.wrap(UserConferencesBookmarker, groups_collection) if groups_collection.is_a?(ActiveRecord::Relation)
+
+    merged_collection = BookmarkedCollection.merge(
+      ['courses', courses_collection],
+      ['groups', groups_collection]
+    )
+
+    results_page = Api.paginate(merged_collection, self, api_v1_conferences_url)
+    render json: api_conferences_json(results_page, @current_user, session)
+  end
+
+  def api_index(conferences, route)
     web_conferences = Api.paginate(conferences, self, route)
+    preload_recordings(web_conferences)
     render json: api_conferences_json(web_conferences, @current_user, session)
   end
   protected :api_index
 
   def web_index(conferences)
+    conferences = conferences.to_a
+    preload_recordings(conferences)
     @new_conferences, @concluded_conferences = conferences.partition { |conference|
       conference.ended_at.nil?
     }
     log_asset_access([ "conferences", @context ], "conferences", "other")
+
+    @render_alternatives = WebConference.conference_types.all? { |ct| ct[:replace_with_alternatives] }
     case @context
     when Course
       @users = User.where(:id => @context.current_enrollments.not_fake.active_by_date.where.not(:user_id => @current_user).select(:user_id)).
         order(User.sortable_name_order_by_clause).to_a
+      @render_alternatives ||= @context.settings[:show_conference_alternatives].present?
     when Group
       @users = @context.participating_users_in_context.where("users.id<>?", @current_user).order(User.sortable_name_order_by_clause).to_a.uniq
+      @render_alternatives ||= @context.context.settings[:show_conference_alternatives].present?
     else
       @users = @context.users.where("users.id<>?", @current_user).order(User.sortable_name_order_by_clause).to_a.uniq
     end
+
     # exposing the initial data as json embedded on page.
     js_env(
       current_conferences: ui_conferences_json(@new_conferences, @context, @current_user, session),
@@ -199,6 +291,8 @@ class ConferencesController < ApplicationController
       default_conference: default_conference_json(@context, @current_user, session),
       conference_type_details: conference_types_json(WebConference.conference_types),
       users: @users.map { |u| {:id => u.id, :name => u.last_name_first} },
+      can_create_conferences: @context.grants_right?(@current_user, session, :create_conferences),
+      render_alternatives: @render_alternatives
     )
     set_tutorial_js_env
     flash[:error] = t('Some conferences on this page are hidden because of errors while retrieving their status') if @errors
@@ -250,7 +344,7 @@ class ConferencesController < ApplicationController
       respond_to do |format|
         params[:web_conference].try(:delete, :long_running)
         params[:web_conference].try(:delete, :conference_type)
-        if @conference.update_attributes(conference_params)
+        if @conference.update(conference_params)
           # TODO: ability to dis-invite people
           members.uniq.each do |u|
             @conference.add_invitee(u)
@@ -407,5 +501,13 @@ class ConferencesController < ApplicationController
   def conference_params
     params.require(:web_conference).
       permit(:title, :duration, :description, :conference_type, :user_settings => strong_anything)
+  end
+
+  def preload_recordings(conferences)
+    conferences.group_by(&:class).each do |klass, klass_conferences|
+      if klass.respond_to?(:preload_recordings) # should only be BigBlueButton for now
+        klass.preload_recordings(klass_conferences)
+      end
+    end
   end
 end

@@ -149,7 +149,12 @@ module Importers
           Importers::AssignmentImporter.process_migration(data, migration); migration.update_import_progress(80)
         end
 
-        Importers::ContextModuleImporter.process_migration(data, migration); migration.update_import_progress(85)
+        module_id = migration.migration_settings[:insert_into_module_id].presence
+        unless module_id && course.context_modules.where(:id => module_id).exists? # we're importing into a module so don't create new ones
+          Importers::ContextModuleImporter.process_migration(data, migration)
+        end
+
+        migration.update_import_progress(85)
         Importers::WikiPageImporter.process_migration_course_outline(data, migration)
         Importers::CalendarEventImporter.process_migration(data, migration)
 
@@ -161,7 +166,8 @@ module Importers
 
         # be very explicit about draft state courses, but be liberal toward legacy courses
         if course.wiki.has_no_front_page
-          if migration.for_course_copy? && (source = migration.source_course || Course.where(id: migration.migration_settings[:source_course_id]).first)
+          if migration.for_course_copy? && !migration.for_master_course_import? &&
+              (source = migration.source_course || Course.where(id: migration.migration_settings[:source_course_id]).first)
             mig_id = migration.content_export.create_key(source.wiki.front_page)
             if new_front_page = course.wiki_pages.where(migration_id: mig_id).first
               course.wiki.set_front_page_url!(new_front_page.url)
@@ -204,6 +210,13 @@ module Importers
         migration.workflow_state = :imported unless post_processing?(migration)
         migration.save
 
+        if migration.for_master_course_import? && migration.migration_settings[:publish_after_completion]
+          if course.unpublished?
+            # i could just do it directly but this way preserves the audit trail
+            course.update_one({:event => 'offer'}, migration.user, :blueprint_sync)
+          end
+        end
+
         if course.changed?
           course.save!
         else
@@ -211,7 +224,6 @@ module Importers
         end
 
         clear_assignment_and_quiz_caches(migration)
-        DueDateCacher.recompute_course(course, update_grades: true, executing_user: migration.user)
       end
 
       migration.trigger_live_events!
@@ -228,12 +240,22 @@ module Importers
       mod = course.context_modules.find_by_id(module_id)
       return unless mod
 
-      imported_items = migration.imported_migration_items
+      import_type = migration.migration_settings[:insert_into_module_type]
+      imported_items = if import_type.present?
+        migration.imported_migration_items_hash[import_class_name(import_type)].values
+      else
+        migration.imported_migration_items
+      end
       return unless imported_items.any?
 
       start_pos = migration.migration_settings[:insert_into_module_position]
       start_pos = start_pos.to_i unless start_pos.nil? # 0 = start; nil = end
       mod.insert_items(imported_items, start_pos)
+    end
+
+    def self.import_class_name(import_type)
+      prefix = ContentMigration.asset_string_prefix(ContentMigration.collection_name(import_type.pluralize))
+      ActiveRecord::Base.convert_class_name(prefix)
     end
 
     def self.move_to_assignment_group(course, migration)
@@ -358,7 +380,10 @@ module Importers
 
     def self.clear_assignment_and_quiz_caches(migration)
       assignments = migration.imported_migration_items_by_class(Assignment).select(&:update_cached_due_dates?)
-      Assignment.clear_cache_keys(assignments, :availability) if assignments.any?
+      if assignments.any?
+        Assignment.clear_cache_keys(assignments, :availability)
+        DueDateCacher.recompute_course(migration.context, assignments: assignments, update_grades: true, executing_user: migration.user)
+      end
       quizzes = migration.imported_migration_items_by_class(Quizzes::Quiz).select(&:should_clear_availability_cache)
       Quizzes::Quiz.clear_cache_keys(quizzes, :availability) if quizzes.any?
     end

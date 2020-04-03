@@ -21,9 +21,10 @@ import React from 'react'
 import {string, node, func, oneOfType} from 'prop-types'
 
 import {CloseButton} from '@instructure/ui-buttons'
-import {Flex, View} from '@instructure/ui-layout'
+import {View} from '@instructure/ui-layout'
+import {Flex} from '@instructure/ui-flex'
 import {Heading} from '@instructure/ui-heading'
-import {Modal} from '@instructure/ui-overlays'
+import {Modal} from '@instructure/ui-modal'
 
 import ErrorBoundary from './ErrorBoundary'
 import GenericErrorPage from './GenericErrorPage'
@@ -34,6 +35,8 @@ CanvasModal.propTypes = {
   children: node.isRequired,
   footer: oneOfType([node, func]), // render prop. usually to render the buttons for the footer.
   padding: View.propTypes.padding,
+
+  title: string, // specify this if the header text should be different than the modal's label
 
   // Optional props to pass to the GenericErrorPage in ErrorBoundary
   errorSubject: string,
@@ -47,6 +50,7 @@ CanvasModal.defaultProps = {
   padding: 'small',
   errorImageUrl: errorShipUrl,
   footer: null,
+  title: null,
   closeButtonSize: 'small'
 }
 
@@ -56,18 +60,21 @@ export default function CanvasModal({
   errorCategory,
   errorImageUrl,
   label,
+  title,
   onDismiss,
   children,
   footer,
   closeButtonSize,
   ...otherModalProps
 }) {
+  if (title == null) title = label
+
   return (
     <Modal label={label} onDismiss={onDismiss} {...otherModalProps}>
       <Modal.Header>
         <Flex>
           <Flex.Item grow>
-            <Heading>{label}</Heading>
+            <Heading>{title}</Heading>
           </Flex.Item>
           <Flex.Item>
             <CloseButton onClick={onDismiss} size={closeButtonSize}>
@@ -91,7 +98,7 @@ export default function CanvasModal({
           </ErrorBoundary>
         </View>
       </Modal.Body>
-      <Modal.Footer>{typeof footer === 'function' ? footer() : footer}</Modal.Footer>
+      {footer && <Modal.Footer>{typeof footer === 'function' ? footer() : footer}</Modal.Footer>}
     </Modal>
   )
 }

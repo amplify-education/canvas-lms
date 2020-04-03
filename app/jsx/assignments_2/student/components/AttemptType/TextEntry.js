@@ -27,6 +27,7 @@ import {IconDocumentLine, IconTextLine, IconTrashLine} from '@instructure/ui-ico
 import LoadingIndicator from '../../../shared/LoadingIndicator'
 import {ScreenReaderContent} from '@instructure/ui-a11y'
 import {View} from '@instructure/ui-layout'
+import {direction} from '../../../../shared/helpers/rtlHelper'
 
 export default class TextEntry extends React.Component {
   static propTypes = {
@@ -63,8 +64,6 @@ export default class TextEntry extends React.Component {
   componentDidUpdate(prevProps) {
     if (this.getDraftBody() !== null && this.props.editingDraft && !this.state.editorLoaded) {
       this.loadRCE()
-    } else if (!this.props.editingDraft && this.state.editorLoaded) {
-      this.unloadRCE()
     }
 
     if (!this.props.editingDraft) {
@@ -83,7 +82,7 @@ export default class TextEntry extends React.Component {
     this._isMounted = false
     window.removeEventListener('beforeunload', this.beforeunload.bind(this))
 
-    if (this.state.editorLoaded && !this.props.editingDraft) {
+    if (this.state.editorLoaded) {
       this.unloadRCE()
     }
   }
@@ -118,19 +117,18 @@ export default class TextEntry extends React.Component {
   }
 
   unloadRCE() {
-    this.setState({editorLoaded: false, renderingEditor: false}, () => {
-      const documentContent = document.getElementById('content')
-      if (documentContent) {
-        const editorIframe = documentContent.querySelector('[id^="random_editor"]')
-        if (editorIframe) {
-          editorIframe.removeEventListener('focus', this.handleEditorIframeFocus)
-        }
+    const documentContent = document.getElementById('content')
+    if (documentContent) {
+      const editorIframe = documentContent.querySelector('[id^="random_editor"]')
+      if (editorIframe) {
+        editorIframe.removeEventListener('focus', this.handleEditorIframeFocus)
       }
-      if (this._textareaRef) {
-        RichContentEditor.destroyRCE(this._textareaRef)
-      }
-      this._textareaRef = null
-    })
+    }
+    if (this._textareaRef) {
+      RichContentEditor.destroyRCE(this._textareaRef)
+    }
+    this._textareaRef = null
+    this.setState({editorLoaded: false, renderingEditor: false})
   }
 
   handleRCEInit = tinyeditor => {
@@ -186,32 +184,31 @@ export default class TextEntry extends React.Component {
   handleSaveButton = () => {
     if (this._isMounted) {
       this.updateSubmissionDraft(this.getRCEText())
-      this.props.updateEditingDraft(false)
+      this.handleExitEditor()
     }
   }
 
   handleDeleteButton = () => {
     if (this._isMounted) {
       this.updateSubmissionDraft(null)
-      this.props.updateEditingDraft(false)
+      this.handleExitEditor()
     }
   }
 
-  renderButtons() {
-    const buttonAlign = {
-      margin: '15px 0 0 0',
-      position: 'absolute',
-      right: '35px'
+  handleExitEditor = () => {
+    if (this._isMounted && this.state.editorLoaded) {
+      this.unloadRCE()
     }
+    this.props.updateEditingDraft(false)
+  }
 
+  renderButtons() {
     return (
-      <div style={buttonAlign}>
+      <div style={{textAlign: direction('right')}}>
         <Button
           data-testid="cancel-text-entry"
           margin="0 xx-small 0 0"
-          onClick={() => {
-            this.props.updateEditingDraft(false)
-          }}
+          onClick={this.handleExitEditor}
         >
           {I18n.t('Cancel')}
         </Button>

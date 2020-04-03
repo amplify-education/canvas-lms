@@ -33,6 +33,7 @@ export default function DirectShareCourseTray({
       label={I18n.t('Copy To...')}
       placement="end"
       onDismiss={onDismiss}
+      padding="medium"
       {...trayProps}
     >
       <DirectShareCoursePanel

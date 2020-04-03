@@ -158,7 +158,8 @@ describe "better_file_browsing" do
 
       it "tabs through all buttons in the header button bar", priority: "1", test_id: 193816 do
         buttons = ff('.ef-file-preview-header-buttons > *')
-        driver.execute_script("$('.ef-file-preview-header-buttons').children().first().focus()")
+        buttons.first.send_keys "" # focuses on the first button
+
         buttons.each do |button|
           check_element_has_focus(button)
           button.send_keys("\t")

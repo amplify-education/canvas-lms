@@ -1644,3 +1644,26 @@ ActiveRecord::Base.prepend(DefeatInspectionFilterMarshalling)
 ActiveRecord::Base.prepend(Canvas::CacheRegister::ActiveRecord::Base)
 ActiveRecord::Base.singleton_class.prepend(Canvas::CacheRegister::ActiveRecord::Base::ClassMethods)
 ActiveRecord::Relation.prepend(Canvas::CacheRegister::ActiveRecord::Relation)
+
+# see https://github.com/rails/rails/issues/37745
+module DontExplicitlyNameColumnsBecauseOfIgnores
+  def build_select(arel)
+    if select_values.any?
+      arel.project(*arel_columns(select_values.uniq))
+    elsif !from_clause.value && klass.ignored_columns.any? && !(klass.ignored_columns & klass.column_names).empty?
+      arel.project(*klass.column_names.map { |field| arel_attribute(field) })
+    else
+      arel.project(table[Arel.star])
+    end
+  end
+end
+ActiveRecord::Relation.prepend(DontExplicitlyNameColumnsBecauseOfIgnores)
+
+module PreserveShardAfterTransaction
+  def after_transaction_commit(&block)
+    shards = Shard.send(:active_shards)
+    shards[:delayed_jobs] = Shard.current.delayed_jobs_shard if ::ActiveRecord::Migration.open_migrations.positive?
+    super { Shard.activate(shards, &block) }
+  end
+end
+ActiveRecord::ConnectionAdapters::Transaction.prepend(PreserveShardAfterTransaction)

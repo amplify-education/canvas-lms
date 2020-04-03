@@ -16,7 +16,7 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-require 'spec_helper'
+require 'sharding_spec_helper'
 
 describe CoursesController do
   describe "GET 'index'" do
@@ -129,7 +129,7 @@ describe CoursesController do
         inactive_enroll = @course.enroll_student(@student, :section => section2, :allow_multiple_enrollments => true)
         inactive_enroll.deactivate
 
-        @course.update_attributes(:start_at => 2.days.ago, :conclude_at => 1.day.ago, :restrict_enrollments_to_course_dates => true)
+        @course.update(:start_at => 2.days.ago, :conclude_at => 1.day.ago, :restrict_enrollments_to_course_dates => true)
 
         user_session(@student)
 
@@ -206,13 +206,13 @@ describe CoursesController do
 
         # section date in past
         course1 = Account.default.courses.create! start_at: 2.months.ago, conclude_at: 1.month.from_now
-        course1.default_section.update_attributes(:end_at => 1.month.ago)
+        course1.default_section.update(:end_at => 1.month.ago)
         course1.offer!
         enrollment1 = course_with_student course: course1, user: @student, active_all: true
 
         # by section date, in future
         course2 = Account.default.courses.create! start_at: 2.months.ago, conclude_at: 1.month.ago
-        course2.default_section.update_attributes(:end_at => 1.month.from_now)
+        course2.default_section.update(:end_at => 1.month.from_now)
         course2.offer!
         enrollment2 = course_with_student course: course2, user: @student, active_all: true
 
@@ -538,6 +538,38 @@ describe CoursesController do
         expect(assignment_permissions[@assignment.id][:update]).to eq(false)
       end
     end
+
+    describe 'Course notification settings' do
+      before(:each) do
+        @course = Course.create!(default_view: "assignments")
+        @teacher = course_with_user("TeacherEnrollment", course: @course, active_all: true).user
+      end
+
+      it 'shows the course notification settings page if enabled' do
+        Account.default.enable_feature!(:mute_notifications_by_course)
+        user_session(@teacher)
+        get 'show', params: {id: @course.id, view: 'notifications'}
+        expect(response).to be_successful
+
+        contains_js_bundle = false
+        assigns['js_bundles'].each do |js_bundle|
+          contains_js_bundle = js_bundle.include? :course_notification_settings_show if js_bundle.include? :course_notification_settings_show
+        end
+        expect(contains_js_bundle).to be true
+      end
+
+      it 'does not show the course notification settings page if disabled' do
+        user_session(@teacher)
+        get 'show', params: {id: @course.id, view: 'notifications'}
+        expect(response).to be_successful
+
+        contains_js_bundle = false
+        assigns['js_bundles'].each do |js_bundle|
+          contains_js_bundle = js_bundle.include? :course_notification_settings_show if js_bundle.include? :course_notification_settings_show
+        end
+        expect(contains_js_bundle).to be false
+      end
+    end
   end
 
   describe "GET 'statistics'" do
@@ -790,9 +822,9 @@ describe CoursesController do
     it "should accept an enrollment for a restricted by dates course" do
       course_with_student_logged_in(:active_all => true)
 
-      @course.update_attributes(:restrict_enrollments_to_course_dates => true,
+      @course.update(:restrict_enrollments_to_course_dates => true,
                                 :start_at => Time.now + 2.weeks)
-      @enrollment.update_attributes(:workflow_state => 'invited', last_activity_at: nil)
+      @enrollment.update(:workflow_state => 'invited', last_activity_at: nil)
 
       post 'enrollment_invitation', params: {:course_id => @course.id, :accept => '1',
         :invitation => @enrollment.uuid}
@@ -965,8 +997,6 @@ describe CoursesController do
 
     context "show feedback for the current course only on course front page" do
       before(:once) do
-        PostPolicy.enable_feature!
-
         course_with_teacher(active_all: true)
         @course1 = @course
         student_in_course(active_all: true, course: @course1)
@@ -1543,6 +1573,7 @@ describe CoursesController do
       @account = Account.default
       role = custom_account_role 'lamer', :account => @account
       @account.role_overrides.create! :permission => 'manage_courses', :enabled => true, :role => role
+      @visperm = @account.role_overrides.create! :permission => 'manage_course_visibility', :enabled => true, :role => role
       user_factory
       @account.account_users.create!(user: @user, role: role)
       user_session @user
@@ -1562,6 +1593,45 @@ describe CoursesController do
 
       post 'create', params: { :account_id => @account.id, :course =>
           { :name => course.name, :lock_all_announcements => true } }
+    end
+
+    it "should set the visibility settings when we have permission" do
+      post 'create', params: {
+        :account_id => @account.id, :course => {
+          name: 'new course',
+          is_public: true,
+          public_syllabus: true,
+          is_public_to_auth_users: true,
+          public_syllabus_to_auth: true
+        }
+      }, format: :json
+
+      json = JSON.parse response.body
+      expect(json['is_public']).to be true
+      expect(json['public_syllabus']).to be true
+      expect(json['is_public_to_auth_users']).to be true
+      expect(json['public_syllabus_to_auth']).to be true
+    end
+
+    it "should NOT allow visibility to be set when we don't have permission" do
+      @visperm.enabled = false
+      @visperm.save
+
+      post 'create', params: {
+        :account_id => @account.id, :course => {
+          name: 'new course',
+          is_public: true,
+          public_syllabus: true,
+          is_public_to_auth_users: true,
+          public_syllabus_to_auth: true
+        }
+      }, format: :json
+
+      json = JSON.parse response.body
+      expect(json['is_public']).to be false
+      expect(json['public_syllabus']).to be false
+      expect(json['is_public_to_auth_users']).to be false
+      expect(json['public_syllabus_to_auth']).to be false
     end
   end
 
@@ -2749,6 +2819,12 @@ describe CoursesController do
       course_with_student_logged_in
       get 'content_share_users', params: {course_id: @course.id, search_term: 'teacher'}
       expect(response).to be_unauthorized
+
+      course_with_designer(name: 'course designer', course: @course)
+      user_session(@designer)
+      get 'content_share_users', params: {course_id: @course.id, search_term: 'teacher'}
+      json = json_parse(response.body)
+      expect(json[0]).to include({'name' => 'search teacher'})
     end
 
     it 'requires the feature be enabled' do
@@ -2757,7 +2833,7 @@ describe CoursesController do
       expect(response).to be_forbidden
     end
 
-    it 'should return email, url avatar, and name' do
+    it 'should return email, url avatar (if avatars are enabled), and name' do
       user_session(@teacher)
       @search_context = @course
       course_with_teacher(name: 'course teacher')
@@ -2765,6 +2841,26 @@ describe CoursesController do
       get 'content_share_users', params: {course_id: @search_context.id, search_term: 'course'}
       json = json_parse(response.body)
       expect(json[0]).to include({'email' => nil, 'name' => 'course teacher', 'avatar_url' => "http://test.host/images/messages/avatar-50.png"})
+    end
+
+    it 'should search by name and email' do
+      user_session(@teacher)
+      @teacher.account.enable_service(:avatars)
+      user_model(name: "course teacher")
+      communication_channel_model(user: @user, path: 'course_teacher@test.edu')
+      course_with_teacher(user: @user, course: @course)
+
+      user_model(name: "course designer")
+      communication_channel_model(user: @user, path: 'course_designer@test.edu')
+      course_with_teacher(user: @user, course: @course)
+
+      get 'content_share_users', params: {course_id: @course.id, search_term: 'course teacher'}
+      json = json_parse(response.body)
+      expect(json[0]).to include({'email' => 'course_teacher@test.edu', 'name' => 'course teacher', 'avatar_url' => "http://test.host/images/messages/avatar-50.png"})
+
+      get 'content_share_users', params: {course_id: @course.id, search_term: 'course_designer@test.edu'}
+      json = json_parse(response.body)
+      expect(json[0]).to include({'email' => 'course_designer@test.edu', 'name' => 'course designer', 'avatar_url' => "http://test.host/images/messages/avatar-50.png"})
     end
 
     it 'searches for teachers, TAs, and designers' do
@@ -2846,6 +2942,111 @@ describe CoursesController do
       get 'content_share_users', params: {course_id: @course.id, search_term: 'less privileged'}
       json = json_parse(response.body)
       expect(json.map{|user| user['name']}).to include('less privileged account admin')
+    end
+
+    it 'should not return users from other root accounts' do
+      user_session(@teacher)
+      a1_course = @course
+      a2 = Account.create!(name: 'other root account')
+      a2_admin = user_factory(name: 'account 2 admin')
+      a2_teacher = user_factory(name: 'account 2 teacher')
+      account_admin_user(account: a2, user: a2_admin)
+      course_with_teacher(name: 'account 2 teacher', account: a2, user: a2_teacher)
+
+      get 'content_share_users', params: {course_id: a1_course.id, search_term: 'account 2'}
+      json = json_parse(response.body)
+      expect(json.map{|user| user['name']}).not_to include('account 2 admin', 'account 2 teacher')
+    end
+
+    context "sharding" do
+      specs_require_sharding
+
+      it "should still have a functional query when user is from another shard" do
+        @shard1.activate do
+          @cs_user = User.create!
+        end
+        @course.enroll_teacher(@cs_user, :enrollment_state => "active")
+        user_session(@cs_user)
+
+        sql = nil
+        allow(Api).to receive(:paginate) do |scope, _controller, _url|
+          sql = scope.to_sql
+        end
+
+        get 'content_share_users', params: {course_id: @course.id, search_term: 'hiyo'}
+        expect(sql).to_not include(@shard1.name) # can't just check for success since the query can still work depending on test shard setup
+      end
+    end
+  end
+
+  describe 'POST update' do
+    it 'allows an admin to change visibility' do
+      admin = account_admin_user
+      course = Course.create!
+      user_session(admin)
+
+      post 'update', params: { id: course.id,
+                               course: { course_visibility: 'public', indexed: true }}
+
+      course.reload
+      expect(course.is_public).to eq true
+      expect(course.indexed).to eq true
+
+    end
+
+    it 'allows the teacher to change visibility' do
+      course = Course.create!
+      teacher = teacher_in_course(course: course, active_all: true).user
+      user_session(teacher)
+
+      post 'update', params: { id: course.id,
+                               course: { course_visibility: 'public', indexed: true }}
+
+      course.reload
+      expect(course.is_public).to eq true
+      expect(course.indexed).to eq true
+    end
+
+    it 'does not allow a teacher without the permission to change visibility' do
+      course = Course.create!
+      teacher = teacher_in_course(course: course, active_all: true).user
+      course.account.role_overrides.create!(role: Role.get_built_in_role('TeacherEnrollment'), permission: 'manage_course_visibility', enabled: false)
+      user_session(teacher)
+
+      post 'update', params: { id: course.id,
+                               course: { course_visibility: 'public', indexed: true }}
+
+      course.reload
+      expect(course.is_public).not_to eq true
+      expect(course.indexed).not_to eq true
+    end
+
+    it 'does not allow an account admin without the permission to change visibility' do
+      admin = account_admin_user_with_role_changes(:role_changes => {'manage_course_visibility' => false})
+      course = Course.create!
+      user_session(admin)
+
+      post 'update', params: { id: course.id,
+                               course: { course_visibility: 'public', indexed: true }}
+
+      course.reload
+      expect(course.is_public).not_to eq true
+      expect(course.indexed).not_to eq true
+    end
+
+    it 'allows a site admin to change visibility even if account admins cannot' do
+      site_admin = site_admin_user
+      account = Account.create(name: 'fake-o')
+      account_with_role_changes(:account => account, :role_changes => { 'manage_course_visibility' => false })
+      course = course_factory(:account => account)
+      user_session(site_admin)
+
+      post 'update', params: { id: course.id,
+                               course: { course_visibility: 'public', indexed: true }}
+
+      course.reload
+      expect(course.is_public).to eq true
+      expect(course.indexed).to eq true
     end
   end
 end

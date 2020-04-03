@@ -415,8 +415,8 @@ describe 'Submissions API', type: :request do
       expect(json['user_id']).to eq @student1.id
     end
 
-    it "does not show grades or hidden comments to students on muted assignments" do
-      @a1.mute!
+    it "does not show grades or hidden comments to students when grades have not posted" do
+      @a1.ensure_post_policy(post_manually: true)
       @a1.grade_student(@student1, grade: 5, grader: @teacher)
 
       @a1.update_submission(@student1, :hidden => false, :comment => "visible comment")
@@ -489,8 +489,8 @@ describe 'Submissions API', type: :request do
       end
     end
 
-    it "does not show rubric assessments to students on muted assignments" do
-      @a1.mute!
+    it "does not show rubric assessments to students when grades have not posted" do
+      @a1.ensure_post_policy(post_manually: true)
       sub = @a1.grade_student(@student1, grade: 5, grader: @teacher).first
 
       rubric = rubric_model(
@@ -1695,8 +1695,6 @@ describe 'Submissions API', type: :request do
 
       before(:each) do
         @course.root_account.enable_feature!(:allow_postable_submission_comments)
-        PostPolicy.enable_feature!
-        @course.enable_feature!(:new_gradebook)
         assignment.ensure_post_policy(post_manually: true)
       end
 
@@ -1716,11 +1714,6 @@ describe 'Submissions API', type: :request do
 
       it "is not included when allow_postable_submission_comments feature is not enabled" do
         @course.root_account.disable_feature!(:allow_postable_submission_comments)
-        expect(student_json.fetch("submissions").first).not_to have_key "has_postable_comments"
-      end
-
-      it "is not included when Post Policies are not enabled" do
-        @course.disable_feature!(:new_gradebook)
         expect(student_json.fetch("submissions").first).not_to have_key "has_postable_comments"
       end
 
@@ -2008,6 +2001,73 @@ describe 'Submissions API', type: :request do
     end
   end
 
+  context "for_students grouped pagination" do
+    before(:once) do
+      @student1 = user_factory(active_all: true)
+      @student2 = user_factory(active_all: true)
+      course_with_teacher(active_all: true)
+      @section1 = @course.course_sections.create!(name: "test section")
+      @section2 = @course.course_sections.create!(name: "test section")
+      student_in_section(@section1, user: @student1, allow_multiple_enrollments: true)
+      student_in_section(@section2, user: @student1, allow_multiple_enrollments: true)
+      student_in_section(@section1, user: @student2, allow_multiple_enrollments: true)
+      @assignment = @course.assignments.create!(title: 'assignment1', grading_type: 'letter_grade', points_possible: 15, only_visible_to_overrides: true)
+      submit_homework(@assignment, @student1)
+      submit_homework(@assignment, @student2)
+    end
+
+    before(:each) do
+      user_session(@teacher)
+    end
+
+    it "fills a page when a student has multiple enrollments" do
+      json = api_call(:get,
+            "/api/v1/courses/#{@course.id}/students/submissions.json",
+            { controller: 'submissions_api', action: 'for_students', format: 'json', course_id: @course.to_param },
+            { student_ids: 'all', grouped: true, per_page: 2, page: 1 })
+      expect(json.map{|u| u["user_id"]}).to eq [@student1.id, @student2.id]
+    end
+
+    it "does not duplicate a student with multiple enrollments when paging" do
+      json = api_call(:get,
+            "/api/v1/courses/#{@course.id}/students/submissions.json",
+            { controller: 'submissions_api', action: 'for_students', format: 'json', course_id: @course.to_param },
+            { student_ids: 'all', grouped: true, per_page: 1, page: 1 })
+      expect(json.map{|u| u["user_id"]}).to eq [@student1.id]
+      json = api_call(:get,
+            "/api/v1/courses/#{@course.id}/students/submissions.json",
+            { controller: 'submissions_api', action: 'for_students', format: 'json', course_id: @course.to_param },
+            { student_ids: 'all', grouped: true, per_page: 1, page: 2 })
+      expect(json.map{|u| u["user_id"]}).to eq [@student2.id]
+    end
+
+    it "prefers an active enrollment when a student has more than one" do
+      enrollments = @student1.enrollments
+      enrollments.first.complete
+      json = api_call(:get,
+            "/api/v1/courses/#{@course.id}/students/submissions.json",
+            { controller: 'submissions_api', action: 'for_students', format: 'json', course_id: @course.to_param },
+            { student_ids: [@student1.id], assignment_ids: [@assignment.id], grouped: true })
+      row = json.detect { |row| row['user_id'] == @student1.id }
+      expect(row['section_id']).to eq enrollments.last.course_section_id
+    end
+
+    it "filters by section" do
+      json = api_call(:get,
+            "/api/v1/sections/#{@section2.id}/students/submissions.json",
+            { controller: 'submissions_api', action: 'for_students', format: 'json', section_id: @section2.to_param },
+            { student_ids: 'all', grouped: true })
+      expect(json.map{|u| u["user_id"]}).to eq [@student1.id]
+    end
+
+    it "rejects an out-of-context user" do
+      api_call(:get,
+            "/api/v1/sections/#{@section2.id}/students/submissions.json",
+            { controller: 'submissions_api', action: 'for_students', format: 'json', section_id: @section2.to_param },
+            { student_ids: [@student1.id, @student2.id], grouped: true }, {}, { expected_status: 401 })
+    end
+  end
+
   context "show (differentiated_assignments)" do
     before do
       # set up course with DA and submit homework for an assignment
@@ -2162,8 +2222,10 @@ describe 'Submissions API', type: :request do
       )
       @a2 = @course.assignments.create!(
         title: 'assignment2', grading_type: 'letter_grade',
-        points_possible: 25, muted: true
+        points_possible: 25
       )
+      @a1.unmute! # automatically post grades for assignment 1
+      @a2.ensure_post_policy(post_manually: true)
 
       @a1.grade_student(@student1, grader: @teacher, grade: 15)
       @a2.grade_student(@student1, grader: @teacher, grade: 5)
@@ -2455,6 +2517,10 @@ describe 'Submissions API', type: :request do
       @student3 = student_in_course(:active_all => true).user
       @assignment1 = @course.assignments.create! :title => 'assignment1', :grading_type => 'points', :points_possible => 15
       @assignment2 = @course.assignments.create! :title => 'assignment2', :grading_type => 'points', :points_possible => 25
+
+      @assignment1.unmute!
+      @assignment2.unmute!
+
       bare_submission_model @assignment1, @student1, grade: 15, grader_id: @teacher.id, score: 15
       bare_submission_model @assignment2, @student1, grade: 25, grader_id: @teacher.id, score: 25
       bare_submission_model @assignment1, @student2, grade: 10, grader_id: @teacher.id, score: 10
@@ -2478,6 +2544,15 @@ describe 'Submissions API', type: :request do
             { 'user_id' => @student3.id, 'assignment_id' => @assignment1.id, 'score' => 20 },
             { 'user_id' => @student3.id, 'assignment_id' => @assignment2.id, 'score' => nil },
         ]
+      end
+
+      it "does not show submissions for a user outside the course" do
+        rando = user_factory
+        api_call_as_user(@teacher, :get, "/api/v1/courses/#{@course.id}/students/submissions",
+                         { :controller => 'submissions_api', :action => 'for_students',
+                           :format => 'json', :course_id => @course.to_param },
+                         { :student_ids => [rando.id] }, {}, { :expected_status => 401 })
+
       end
     end
 
@@ -2809,6 +2884,108 @@ describe 'Submissions API', type: :request do
 
       expect(submission.reload).not_to be_excused
       expect(json['excused']).to eq false
+    end
+
+    context "group assignments" do
+      before do
+        @student2 = @course.enroll_student(User.create!, enrollment_state: :active).user
+        group_category = @course.group_categories.create!(name: "Category")
+        group = @course.groups.create!(name: "Group", group_category: group_category)
+        group.users = [@student, @student2]
+        @assignment.update!(group_category: group_category, grade_group_students_individually: false)
+      end
+
+      it "can set late policy status on a group member's submission" do
+        api_call(
+          :put,
+          "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}.json",
+          {
+            controller: "submissions_api",
+            action: "update",
+            format: "json",
+            course_id: @course.id.to_s,
+            assignment_id: @assignment.id.to_s,
+            user_id: @student.id.to_s
+          }, {
+            submission: {
+              late_policy_status: 'missing'
+            }
+          }
+        )
+
+        submission = @assignment.submission_for_student(@student2)
+        expect(submission.late_policy_status).to eq 'missing'
+      end
+
+      it "can set seconds_late_override on a group member's submission" do
+        seconds_late_override = 3.days
+        api_call(
+          :put,
+          "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}.json",
+          {
+            controller: 'submissions_api',
+            action: 'update',
+            format: 'json',
+            course_id: @course.id.to_s,
+            assignment_id: @assignment.id.to_s,
+            user_id: @student.id.to_s
+          }, {
+            submission: {
+              late_policy_status: 'late',
+              seconds_late_override: seconds_late_override
+            }
+          }
+        )
+
+        submission = @assignment.submission_for_student(@student2)
+        expect(submission.seconds_late).to eq seconds_late_override.to_i
+      end
+
+      it "does not excuse the whole group when excusing one group member" do
+        api_call(
+          :put,
+          "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}.json",
+          {
+            controller: "submissions_api",
+            action: "update",
+            format: "json",
+            course_id: @course.id.to_s,
+            assignment_id: @assignment.id.to_s,
+            user_id: @student.id.to_s
+          }, {
+            submission: {
+              excuse: "1",
+              late_policy_status: 'missing'
+            }
+          }
+        )
+
+        submission = @assignment.submission_for_student(@student2)
+        expect(submission).not_to be_excused
+      end
+
+      it "does not set late policy status for the whole group when assignment grades individually" do
+        @assignment.update!(grade_group_students_individually: true)
+        api_call(
+          :put,
+          "/api/v1/courses/#{@course.id}/assignments/#{@assignment.id}/submissions/#{@student.id}.json",
+          {
+            controller: "submissions_api",
+            action: "update",
+            format: "json",
+            course_id: @course.id.to_s,
+            assignment_id: @assignment.id.to_s,
+            user_id: @student.id.to_s
+          }, {
+            submission: {
+              late_policy_status: 'missing'
+            }
+          }
+        )
+
+        submission = @assignment.submission_for_student(@student2)
+        expect(submission.late_policy_status).not_to eq "missing"
+      end
     end
 
     it "can set late policy status on a submission" do
@@ -3321,70 +3498,54 @@ describe 'Submissions API', type: :request do
     expect(json['score']).to eq 12.9
   end
 
-  it "adds hidden comments if the assignment is muted" do
-    course_with_teacher(:active_all => true)
-    student    = user_factory(active_all: true)
-    assignment = @course.assignments.create!(:title => 'assignment')
-    assignment.update_attribute(:muted, true)
-    @user = @teacher
-    @course.enroll_student(student).accept!
-    submission = assignment.find_or_create_submission(student)
-    api_call(:put, "/api/v1/courses/#{@course.id}/assignments/#{assignment.id}/submissions/#{student.id}",
-      { :controller => 'submissions_api', :action => 'update', :format => 'json',
-        :course_id => @course.to_param, :assignment_id => assignment.to_param,
-        :user_id => student.to_param },
-      { :comment => { :text_comment => 'hidden comment' } })
+  it "hides comments when the assignment posts manually and submission is not posted" do
+    course = Course.create!
+    assignment = course.assignments.create!
+    student = course.enroll_student(User.create!, enrollment_state: :active).user
+    teacher = course.enroll_teacher(User.create!, enrollment_state: :active).user
+    submission = assignment.submissions.find_by!(user: student)
+    @user = teacher
+
+    assignment.ensure_post_policy(post_manually: true)
+    api_call(
+      :put,
+      "/api/v1/courses/#{course.id}/assignments/#{assignment.id}/submissions/#{student.id}",
+      {
+        controller: "submissions_api",
+        action: "update",
+        format: "json",
+        course_id: course.to_param,
+        assignment_id: assignment.to_param,
+        user_id: student.to_param
+      },
+      { comment: { text_comment: "a comment!" } }
+    )
     expect(submission.submission_comments.order("id DESC").first).to be_hidden
   end
 
-  context "with post policies enabled" do
-    let_once(:course) { Course.create! }
-    let_once(:assignment) { course.assignments.create! }
-    let_once(:student) { course.enroll_student(User.create!, enrollment_state: :active).user }
-    let_once(:teacher) { course.enroll_teacher(User.create!, enrollment_state: :active).user }
-    let_once(:submission) { assignment.submissions.find_by!(user: student) }
+  it "does not hide comments when the submission is already posted" do
+    course = Course.create!
+    assignment = course.assignments.create!
+    student = course.enroll_student(User.create!, enrollment_state: :active).user
+    teacher = course.enroll_teacher(User.create!, enrollment_state: :active).user
+    submission = assignment.submissions.find_by!(user: student)
+    @user = teacher
 
-    before(:once) do
-      PostPolicy.enable_feature!
-      course.enable_feature!(:new_gradebook)
-      @user = teacher
-    end
-
-    it "hides comments when the assignment posts manually and submission is not posted" do
-      assignment.ensure_post_policy(post_manually: true)
-      api_call(
-        :put,
-        "/api/v1/courses/#{course.id}/assignments/#{assignment.id}/submissions/#{student.id}",
-        {
-          controller: "submissions_api",
-          action: "update",
-          format: "json",
-          course_id: course.to_param,
-          assignment_id: assignment.to_param,
-          user_id: student.to_param
-        },
-        { comment: { text_comment: "a comment!" } }
-      )
-      expect(submission.submission_comments.order("id DESC").first).to be_hidden
-    end
-
-    it "does not hide comments when the submission is already posted" do
-      submission.update!(posted_at: Time.zone.now)
-      api_call(
-        :put,
-        "/api/v1/courses/#{course.id}/assignments/#{assignment.id}/submissions/#{student.id}",
-        {
-          controller: "submissions_api",
-          action: "update",
-          format: "json",
-          course_id: course.to_param,
-          assignment_id: assignment.to_param,
-          user_id: student.to_param
-        },
-        { comment: { text_comment: "a comment!" } }
-      )
-      expect(submission.submission_comments.order("id DESC").first).not_to be_hidden
-    end
+    submission.update!(posted_at: Time.zone.now)
+    api_call(
+      :put,
+      "/api/v1/courses/#{course.id}/assignments/#{assignment.id}/submissions/#{student.id}",
+      {
+        controller: "submissions_api",
+        action: "update",
+        format: "json",
+        course_id: course.to_param,
+        assignment_id: assignment.to_param,
+        user_id: student.to_param
+      },
+      { comment: { text_comment: "a comment!" } }
+    )
+    expect(submission.submission_comments.order("id DESC").first).not_to be_hidden
   end
 
   it "does not hide student comments on muted assignments" do
@@ -3941,7 +4102,7 @@ describe 'Submissions API', type: :request do
       end
 
       it "creates a online text submission" do
-        @assignment.update_attributes(:submission_types => 'online_text_entry')
+        @assignment.update(:submission_types => 'online_text_entry')
         json = do_submit(:submission_type => 'online_text_entry', :body => %{<p>
           This is <i>some</i> text. The <script src='evil.com'></script> sanitization will take effect.
         </p>})
@@ -3952,7 +4113,7 @@ describe 'Submissions API', type: :request do
       end
 
       it "processs html content in body" do
-        @assignment.update_attributes(:submission_types => 'online_text_entry')
+        @assignment.update(:submission_types => 'online_text_entry')
         should_process_incoming_user_content(@course) do |content|
           do_submit(:submission_type => 'online_text_entry', :body => content)
           @submission.body
@@ -3960,7 +4121,7 @@ describe 'Submissions API', type: :request do
       end
 
       it "creates a file upload submission" do
-        @assignment.update_attributes(:submission_types => 'online_upload')
+        @assignment.update(:submission_types => 'online_upload')
         a1 = attachment_model(:context => @user)
         a2 = attachment_model(:context => @user)
         json = do_submit(:submission_type => 'online_upload', :file_ids => [a1.id, a2.id])
@@ -3971,7 +4132,7 @@ describe 'Submissions API', type: :request do
       end
 
       it "creates a media comment submission" do
-        @assignment.update_attributes(:submission_types => "media_recording")
+        @assignment.update(:submission_types => "media_recording")
         media_object(:media_id => "3232", :media_type => "audio")
         json = do_submit(:submission_type => "media_recording", :media_comment_id => "3232", :media_comment_type => "audio")
         expect(json['media_comment'].slice('media_id', 'media_type')).to eq({
@@ -3981,7 +4142,7 @@ describe 'Submissions API', type: :request do
       end
 
       it "copys files to the submissions folder if they're not there already" do
-        @assignment.update_attributes(:submission_types => 'online_upload')
+        @assignment.update(:submission_types => 'online_upload')
         a1 = attachment_model(:context => @user, :folder => @user.submissions_folder)
         a2 = attachment_model(:context => @user)
         json = do_submit(:submission_type => 'online_upload', :file_ids => [a1.id, a2.id])
@@ -3996,7 +4157,7 @@ describe 'Submissions API', type: :request do
 
     context "submission file uploads" do
       before :once do
-        @assignment.update_attributes(:submission_types => 'online_upload')
+        @assignment.update(:submission_types => 'online_upload')
         @student1 = @student
         course_with_student(:course => @course)
         @context = @course
@@ -4051,14 +4212,20 @@ describe 'Submissions API', type: :request do
       end
 
       it "rejects uploading files when filetype is not allowed" do
-        @assignment.update_attributes(:allowed_extensions => ['doc'])
+        @assignment.update(:allowed_extensions => ['doc'])
         preflight(name: 'test.txt', size: 12345, content_type: 'text/plain')
         assert_status(400)
       end
 
       it "allows filetype when restricted and is correct filetype" do
-        @assignment.update_attributes(:allowed_extensions => ['txt'])
+        @assignment.update(:allowed_extensions => ['txt'])
         preflight(name: 'test.txt', size: 12345, content_type: 'text/plain')
+        assert_status(200)
+      end
+
+      it "falls back to parsing the extension when an unknown type" do
+        @assignment.update(:allowed_extensions => ['beepboop'])
+        preflight(name: 'test.beepboop', size: 12345)
         assert_status(200)
       end
 
@@ -4068,28 +4235,9 @@ describe 'Submissions API', type: :request do
         expect(f.submission_context_code).to eq @course.asset_string
       end
 
-      context 'for url upload using DelayedJob' do
-        let(:json_response) do
-          preflight(url: 'http://example.com/test', filename: 'test.txt')
-          JSON.parse(response.body)
-        end
-
-        before { allow(InstFS).to receive(:enabled?).and_return(false) }
-
-        it "returns progress json" do
-          progress_json = {
-            "context_id" => @assignment.id,
-            "context_type" =>"Assignment",
-            "user_id" => @student1.id,
-            "tag" => "upload_via_url"
-          }
-          expect(json_response['progress']).to include progress_json
-        end
-      end
-
       context 'for url upload using InstFS' do
         let(:json_response) do
-          preflight(url: 'http://example.com/test')
+          preflight(url: 'http://example.com/test', comment: 'my comment')
           JSON.parse(response.body)
         end
 
@@ -4102,6 +4250,7 @@ describe 'Submissions API', type: :request do
           it 'encodes capture_params in the token' do
             capture_params = {
               "eula_agreement_timestamp" => nil,
+              "comment" => "my comment",
               "context_type" => "User",
               "context_id" => @student1.id.to_s,
               "user_id" => @student1.id.to_s,
@@ -4139,7 +4288,7 @@ describe 'Submissions API', type: :request do
 
       context 'for url upload using DelayedJob' do
         let(:json_response) do
-          preflight(url: 'http://example.com/test', filename: 'test.txt')
+          preflight(url: 'http://example.com/test', filename: 'test.txt', comment: 'hello comment')
           JSON.parse(response.body)
         end
 
@@ -4159,6 +4308,7 @@ describe 'Submissions API', type: :request do
           json_response
           job = Delayed::Job.order(:id).last
           expect(job.handler).to include Services::SubmitHomeworkService::SubmitWorker.name
+          expect(job.handler).to include 'hello comment'
         end
 
         it 'should enqueue the copy job when the submit_assignment parameter is false' do
@@ -4175,7 +4325,7 @@ describe 'Submissions API', type: :request do
     end
 
     it "rejects attachment ids not belonging to the user" do
-      @assignment.update_attributes(:submission_types => 'online_upload')
+      @assignment.update(:submission_types => 'online_upload')
       a1 = attachment_model(:context => @course)
       json = api_call(:post, @url, @args, { :submission => { :submission_type => "online_upload", :file_ids => [a1.id] } }, {}, :expected_status => 400)
       expect(json['message']).to eq 'No valid file ids given'

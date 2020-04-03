@@ -219,7 +219,10 @@ require 'csv'
 #                 "admin",
 #                 "observer",
 #                 "unenrolled"
-#               ]
+#               ],
+#               "is_featured": true,
+#               "is_new": false,
+#               "feature_headline": "Check this out!"
 #             }
 #           ]
 #         },
@@ -236,7 +239,10 @@ require 'csv'
 #               "subtext": "Questions are submitted to your instructor",
 #               "url": "#teacher_feedback",
 #               "type": "default",
-#               "id": "instructor_question"
+#               "id": "instructor_question",
+#               "is_featured": false,
+#               "is_new": true,
+#               "feature_headline": ""
 #             },
 #             {
 #               "available_to": [
@@ -251,7 +257,10 @@ require 'csv'
 #               "subtext": "Find answers to common questions",
 #               "url": "http://community.canvaslms.com/community/answers/guides",
 #               "type": "default",
-#               "id": "search_the_canvas_guides"
+#               "id": "search_the_canvas_guides",
+#               "is_featured": false,
+#               "is_new": false,
+#               "feature_headline": ""
 #             },
 #             {
 #               "available_to": [
@@ -266,7 +275,10 @@ require 'csv'
 #               "subtext": "If Canvas misbehaves, tell us about it",
 #               "url": "#create_ticket",
 #               "type": "default",
-#               "id": "report_a_problem"
+#               "id": "report_a_problem",
+#               "is_featured": false,
+#               "is_new": false,
+#               "feature_headline": ""
 #             }
 #           ]
 #         }
@@ -537,9 +549,24 @@ class AccountsController < ApplicationController
   #   The filter to search by. "course" searches for course names, course codes,
   #   and SIS IDs. "teacher" searches for teacher names
   #
+  # @argument starts_before [Optional, Date]
+  #   If set, only return courses that start before the value (inclusive)
+  #   or their enrollment term starts before the value (inclusive)
+  #   or both the course's start_at and the enrollment term's start_at are set to null.
+  #   The value should be formatted as: yyyy-mm-dd or ISO 8601 YYYY-MM-DDTHH:MM:SSZ.
+  #
+  # @argument ends_after [Optional, Date]
+  #   If set, only return courses that end after the value (inclusive)
+  #   or their enrollment term ends after the value (inclusive)
+  #   or both the course's end_at and the enrollment term's end_at are set to null.
+  #   The value should be formatted as: yyyy-mm-dd or ISO 8601 YYYY-MM-DDTHH:MM:SSZ.
+  #
   # @returns [Course]
   def courses_api
     return unless authorized_action(@account, @current_user, :read_course_list)
+
+    starts_before = CanvasTime.try_parse(params[:starts_before])
+    ends_after = CanvasTime.try_parse(params[:ends_after])
 
     params[:state] ||= %w{created claimed available completed}
     params[:state] = %w{created claimed available completed deleted} if Array(params[:state]).include?('all')
@@ -607,6 +634,20 @@ class AccountsController < ApplicationController
       @courses = @courses.associated_courses
     elsif !params[:blueprint_associated].nil?
       @courses = @courses.not_associated_courses
+    end
+
+    if starts_before || ends_after
+      @courses = @courses.joins(:enrollment_term)
+      if starts_before
+        @courses = @courses.where("
+        (courses.start_at IS NULL AND enrollment_terms.start_at IS NULL)
+        OR courses.start_at <= ? OR enrollment_terms.start_at <= ?", starts_before, starts_before)
+      end
+      if ends_after
+        @courses = @courses.where("
+        (courses.conclude_at IS NULL AND enrollment_terms.end_at IS NULL)
+        OR courses.conclude_at >= ? OR enrollment_terms.end_at >= ?", ends_after, ends_after)
+      end
     end
 
     if params[:by_teachers].is_a?(Array)
@@ -750,7 +791,7 @@ class AccountsController < ApplicationController
         render :json => @account.errors, :status => :unauthorized
       else
         success = @account.errors.empty?
-        success &&= @account.update_attributes(account_settings.merge(quota_settings)) rescue false
+        success &&= @account.update(account_settings.merge(quota_settings)) rescue false
 
         if success
           # Successfully completed
@@ -858,7 +899,7 @@ class AccountsController < ApplicationController
           sorted_help_links.map! do |index_with_hash|
             hash = index_with_hash[1].to_hash.with_indifferent_access
             hash.delete('state')
-            hash.assert_valid_keys ["text", "subtext", "url", "available_to", "type", "id"]
+            hash.assert_valid_keys %w[text subtext url available_to type id is_featured is_new feature_headline]
             hash
           end
           @account.settings[:custom_help_links] = @account.help_links_builder.process_links_before_save(sorted_help_links)
@@ -914,7 +955,8 @@ class AccountsController < ApplicationController
             :include_integration_ids_in_gradebook_exports,
             :show_scheduler,
             :global_includes,
-            :gmail_domain
+            :gmail_domain,
+            :limit_parent_app_web_access,
           ].each do |key|
             params[:account][:settings].try(:delete, key)
           end
@@ -955,7 +997,7 @@ class AccountsController < ApplicationController
         # Set default Dashboard view
         set_default_dashboard_view(params.dig(:account, :settings)&.delete(:default_dashboard_view))
 
-        if @account.update_attributes(strong_account_params)
+        if @account.update(strong_account_params)
           update_user_dashboards
           format.html { redirect_to account_settings_url(@account) }
           format.json { render :json => @account }
@@ -1113,6 +1155,23 @@ class AccountsController < ApplicationController
       end
     else
       render_unauthorized_action
+    end
+  end
+
+  def eportfolio_moderation
+    if authorized_action(@account, @current_user, :moderate_user_content)
+      return redirect_to account_settings_url(@account) unless @account.root_account.feature_enabled?(:eportfolio_moderation)
+
+      results_per_page = Setting.get('eportfolio_moderation_results_per_page', 1000)
+      spam_status_order = "CASE spam_status WHEN 'flagged_as_possible_spam' THEN 0 WHEN 'marked_as_spam' THEN 1 WHEN 'marked_as_safe' THEN 2 ELSE 3 END"
+      @eportfolios = Eportfolio.active.preload(:user).
+        joins(:user).
+        joins("JOIN #{UserAccountAssociation.quoted_table_name} ON eportfolios.user_id = user_account_associations.user_id AND user_account_associations.account_id = #{@account.id}").
+        where(spam_status: ["flagged_as_possible_spam", "marked_as_spam", "marked_as_safe"]).
+        where("EXISTS (?)", Eportfolio.where("user_id = users.id").where(spam_status: ['flagged_as_possible_spam', 'marked_as_spam'])).
+        merge(User.active).
+        order(Arel.sql(spam_status_order), Arel.sql("eportfolios.public DESC NULLS LAST"), updated_at: :desc).
+        paginate(per_page: results_per_page, page: params[:page])
     end
   end
 
@@ -1426,6 +1485,7 @@ class AccountsController < ApplicationController
                                    :default_group_storage_quota, :default_group_storage_quota_mb,
                                    :default_user_storage_quota, :default_user_storage_quota_mb, :default_time_zone,
                                    :edit_institution_email, :enable_alerts, :enable_eportfolios, :enable_course_catalog,
+                                   :limit_parent_app_web_access,
                                    {:enable_offline_web_export => [:value]}.freeze,
                                    :enable_profiles, :enable_gravatar, :enable_turnitin, :equella_endpoint,
                                    :equella_teaser, :external_notification_warning, :global_includes,
@@ -1442,7 +1502,7 @@ class AccountsController < ApplicationController
                                    :self_enrollment, :show_scheduler, :sis_app_token, :sis_app_url,
                                    {:sis_assignment_name_length => [:value]}.freeze,
                                    {:sis_assignment_name_length_input => [:value]}.freeze,
-                                   {:sis_default_grade_export => [:value]}.freeze,
+                                   {:sis_default_grade_export => [:value, :locked]}.freeze,
                                    :sis_name,
                                    {:sis_require_assignment_due_date => [:value]}.freeze,
                                    {:sis_syncing => [:value, :locked]}.freeze,

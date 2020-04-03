@@ -23,6 +23,8 @@ describe ContentParticipationCount do
     course_with_teacher(:active_all => true)
     student_in_course(:active_all => true)
 
+    @course.default_post_policy.update!(post_manually: false)
+
     @assignment = @course.assignments.new(:title => "some assignment")
     @assignment.workflow_state = "published"
     @assignment.save
@@ -171,6 +173,7 @@ describe ContentParticipationCount do
     end
 
     it "ignores hidden comments" do
+      @assignment.ensure_post_policy(post_manually: true)
       @submission = @assignment.update_submission(
         @student,
         {

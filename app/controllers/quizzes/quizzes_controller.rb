@@ -107,8 +107,10 @@ class Quizzes::QuizzesController < ApplicationController
         :URLS => {
           new_assignment_url: new_polymorphic_url([@context, :assignment]),
           new_quiz_url: context_url(@context, :context_quizzes_new_url, :fresh => 1),
+          new_quizzes_selection: api_v1_course_new_quizzes_selection_update_url(@context),
           question_banks_url: context_url(@context, :context_question_banks_url),
-          assignment_overrides: api_v1_course_quiz_assignment_overrides_url(@context)
+          assignment_overrides: api_v1_course_quiz_assignment_overrides_url(@context),
+          new_quizzes_assignment_overrides: api_v1_course_new_quizzes_assignment_overrides_url(@context)
         },
         :PERMISSIONS => {
           create: can_do(@context.quizzes.temp_record, @current_user, :create),
@@ -128,11 +130,14 @@ class Quizzes::QuizzesController < ApplicationController
           DIRECT_SHARE_ENABLED: can_manage && @domain_root_account.try(:feature_enabled?, :direct_share),
         },
         :quiz_menu_tools => external_tools_display_hashes(:quiz_menu),
+        :quiz_index_menu_tools => (@domain_root_account&.feature_enabled?(:commons_favorites) ?
+          external_tools_display_hashes(:quiz_index_menu) : []),
         :SIS_NAME => sis_name,
         :MAX_NAME_LENGTH => max_name_length,
         :DUE_DATE_REQUIRED_FOR_ACCOUNT => due_date_required_for_account,
         :MAX_NAME_LENGTH_REQUIRED_FOR_ACCOUNT => max_name_length_required_for_account,
-        :SIS_INTEGRATION_SETTINGS_ENABLED => sis_integration_settings_enabled
+        :SIS_INTEGRATION_SETTINGS_ENABLED => sis_integration_settings_enabled,
+        :NEW_QUIZZES_SELECTED => quiz_engine_selection
       }
       if @context.is_a?(Course) && @context.grants_right?(@current_user, session, :read)
         hash[:COURSE_ID] = @context.id.to_s
@@ -393,7 +398,7 @@ class Quizzes::QuizzesController < ApplicationController
       @quiz.content_being_saved_by(@current_user)
       @quiz.infer_times
       @quiz.transaction do
-        @quiz.update_attributes!(quiz_params)
+        @quiz.update!(quiz_params)
         batch_update_assignment_overrides(@quiz, overrides, @current_user) unless overrides.nil?
       end
 
@@ -1035,11 +1040,26 @@ class Quizzes::QuizzesController < ApplicationController
     unless @context.root_account.feature_enabled?(:newquizzes_on_quiz_page)
       return quizzes_json(old_quizzes, *serializer_options)
     end
-    new_quizzes = Assignments::ScopedToUser.new(@context, @current_user).scope.preload(:duplicate_of).select(&:quiz_lti?)
+    new_quizzes = Assignments::ScopedToUser.new(@context, @current_user).scope.preload(:duplicate_of).type_quiz_lti
     quizzes_next_json(
-      (old_quizzes + new_quizzes).sort_by(&:created_at),
+      sort_quizzes(old_quizzes + new_quizzes),
       *serializer_options
     )
+  end
+
+  def sort_quizzes(quizzes)
+    quizzes.sort_by do |quiz|
+      [
+        quiz_due_date(quiz) || CanvasSort::Last,
+        Canvas::ICU.collation_key(quiz.title || CanvasSort::First)
+      ]
+    end
+  end
+
+  # get the due_date for either a Classic Quiz or a quiz_lti quiz (Assignment)
+  def quiz_due_date(quiz)
+    return quiz.assignment ? quiz.assignment.due_at : quiz.lock_at if quiz.is_a?(Quizzes::Quiz)
+    quiz.due_at || quiz.lock_at
   end
 
   protected
@@ -1069,12 +1089,18 @@ class Quizzes::QuizzesController < ApplicationController
 
     scope = DifferentiableAssignment.scope_filter(scope, @current_user, @context)
 
-    @_quizzes = scope.sort_by do |quiz|
-      due_date = quiz.assignment ? quiz.assignment.due_at : quiz.lock_at
-      [
-        due_date || CanvasSort::Last,
-        Canvas::ICU.collation_key(quiz.title || CanvasSort::First)
-      ]
+    @_quizzes = sort_quizzes(scope)
+  end
+
+  def quiz_engine_selection
+    selection = nil
+    if @context.is_a?(Course) && @context.settings.dig(:engine_selected, :user_id)
+      user_id = @current_user.id
+      selection_obj = @context.settings.dig(:engine_selected, :user_id)
+      if selection_obj[:expiration] > Time.zone.today
+        selection = selection_obj[:newquizzes_engine_selected]
+      end
+      selection
     end
   end
 end

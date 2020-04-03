@@ -49,8 +49,6 @@ RSpec.shared_examples 'a submission update action' do |controller|
       before(:once) do
         course.enroll_student(student)
         course.enroll_teacher(teacher)
-        course.enable_feature!(:new_gradebook)
-        PostPolicy.enable_feature!
       end
 
       it "should allow updating homework to add comments" do
@@ -142,23 +140,41 @@ RSpec.shared_examples 'a submission update action' do |controller|
           expect(submission_json["submission"]["body"]).to eq submission.reload.body
         end
 
-        context "when assignment is muted" do
-          before(:once) do
-            assignment.update!(muted: true)
+        context "when assignment posts manually" do
+          before do
+            assignment.post_policy.update!(post_manually: true)
           end
 
-          it "does not render the submission body" do
+          it "does not render the submission body when submission is unposted" do
+            assignment.hide_submissions
             params = {assignment_id: assignment.id, course_id: course.id, submission: {comment: "hi"}}.merge(resource_pair)
             put :update, params: params, format: :json
             submission_json = JSON.parse(response.body).select { |s| s["submission"]["id"] == submission.id }.first
             expect(submission_json["submission"]["body"]).to be_nil
           end
 
-          it "does not render the submission body, when updating What-If scores" do
+          it "does not render the submission body when updating What-If scores and submission is unposted" do
+            assignment.hide_submissions
             params = {assignment_id: assignment.id, course_id: course.id, submission: {student_entered_score: "2"}}.merge(resource_pair)
             put :update, params: params, format: :json
             submission_json = JSON.parse(response.body)
             expect(submission_json["submission"]["body"]).to be_nil
+          end
+
+          it "renders the submission body when submission is posted" do
+            assignment.post_submissions
+            params = {assignment_id: assignment.id, course_id: course.id, submission: {comment: "hi"}}.merge(resource_pair)
+            put :update, params: params, format: :json
+            submission_json = JSON.parse(response.body).select { |s| s["submission"]["id"] == submission.id }.first
+            expect(submission_json["submission"]["body"]).to be_present
+          end
+
+          it "renders the submission body when updating What-If scores and submission is posted" do
+            assignment.post_submissions
+            params = {assignment_id: assignment.id, course_id: course.id, submission: {student_entered_score: "2"}}.merge(resource_pair)
+            put :update, params: params, format: :json
+            submission_json = JSON.parse(response.body)
+            expect(submission_json["submission"]["body"]).to be_present
           end
         end
       end
@@ -184,23 +200,23 @@ RSpec.shared_examples 'a submission update action' do |controller|
           expect(submission_json["submission"]["body"]).to eq submission.reload.body
         end
 
-        context "when assignment is muted" do
-          before(:once) do
-            assignment.update!(muted: true)
+        context "when assignment posts manually" do
+          before do
+            assignment.post_policy.update!(post_manually: true)
           end
 
-          it "renders the submission body with quiz submission data" do
+          it "renders the submission body when submission is unposted" do
             params = {assignment_id: assignment.id, course_id: course.id, submission: {comment: "hi"}}.merge(resource_pair)
             put :update, params: params, format: :json
             submission_json = JSON.parse(response.body).select { |s| s["submission"]["id"] == submission.id }.first
-            expect(submission_json["submission"]["body"]).to eq submission.reload.body
+            expect(submission_json["submission"]["body"]).to be_present
           end
 
-          it "renders the submission body with quiz submission data, when updating What-If scores" do
+          it "renders the submission body when updating What-If scores and submission is unposted" do
             params = {assignment_id: assignment.id, course_id: course.id, submission: {student_entered_score: "2"}}.merge(resource_pair)
             put :update, params: params, format: :json
             submission_json = JSON.parse(response.body)
-            expect(submission_json["submission"]["body"]).to eq submission.reload.body
+            expect(submission_json["submission"]["body"]).to be_present
           end
         end
       end
@@ -222,11 +238,11 @@ RSpec.shared_examples 'a submission update action' do |controller|
       expect(assigns[:submission].submission_comments.first).not_to be_hidden
     end
 
-    it "should allow a non-enrolled admin to add comments on a submission to muted assignment" do
+    it "should allow a non-enrolled admin to add comments on an unposted submission" do
       course_with_student_logged_in(active_all: true)
       @assignment = @course.assignments.create!(title: "some assignment", submission_types: "online_url,online_upload")
+      @assignment.ensure_post_policy(post_manually: true)
       @submission = @assignment.submit_homework(@user)
-      @assignment.muted = true
       @assignment.save!
       site_admin_user
       user_session(@user)
@@ -384,8 +400,8 @@ RSpec.shared_examples 'a submission update action' do |controller|
         expect(body['published_score']).to eq 10
       end
 
-      it "renders json with scores for teachers on muted assignments" do
-        @assignment.update!(muted: true)
+      it "renders json with scores for teachers for unposted submissions" do
+        @assignment.ensure_post_policy(post_manually: true)
         @resource_pair = controller == :anonymous_submissions ? { anonymous_id: @submission.anonymous_id } : { id: @user.id }
         @params = { course_id: @course.id, assignment_id: @assignment.id, submission: {student_entered_score: '2'} }.merge(@resource_pair)
         put :update, params: @params, format: :json
@@ -396,9 +412,9 @@ RSpec.shared_examples 'a submission update action' do |controller|
         expect(body['published_score']).to eq 10
       end
 
-      it "renders json without scores for students on muted assignments" do
+      it "renders json without scores for students for unposted submissions" do
         user_session(@student)
-        @assignment.update!(muted: true)
+        @assignment.ensure_post_policy(post_manually: true)
         @resource_pair = controller == :anonymous_submissions ? { anonymous_id: @submission.anonymous_id } : { id: @user.id }
         @params = { course_id: @course.id, assignment_id: @assignment.id, submission: {student_entered_score: '2'} }.merge(@resource_pair)
         put :update, params: @params, format: :json

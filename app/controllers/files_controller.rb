@@ -134,7 +134,7 @@ class FilesController < ApplicationController
   before_action :require_context, except: [
     :assessment_question_show, :image_thumbnail, :show_thumbnail,
     :create_pending, :s3_success, :show, :api_create, :api_create_success, :api_create_success_cors,
-    :api_show, :api_index, :destroy, :api_update, :api_file_status, :public_url, :api_capture
+    :api_show, :api_index, :destroy, :api_update, :api_file_status, :public_url, :api_capture, :reset_verifier
   ]
 
   before_action :check_file_access_flags, only: [:show_relative, :show]
@@ -147,7 +147,7 @@ class FilesController < ApplicationController
   prepend_around_action :load_pseudonym_from_policy, only: :create
   skip_before_action :verify_authenticity_token, only: :api_create
   before_action :verify_api_id, only: [
-    :api_show, :api_create_success, :api_file_status, :api_update, :destroy
+    :api_show, :api_create_success, :api_file_status, :api_update, :destroy, :reset_verifier
   ]
 
   include Api::V1::Attachment
@@ -379,6 +379,8 @@ class FilesController < ApplicationController
         has_external_tools = !context.is_a?(Group) && tool_context
 
         file_menu_tools = (has_external_tools ? external_tools_display_hashes(:file_menu, tool_context, [:accept_media_types]) : [])
+        file_index_menu_tools = (has_external_tools && @domain_root_account&.feature_enabled?(:commons_favorites)) ?
+          external_tools_display_hashes(:file_index_menu, tool_context) : []
 
         {
           asset_string: context.asset_string,
@@ -387,7 +389,8 @@ class FilesController < ApplicationController
           permissions: {
             manage_files: context.grants_right?(@current_user, session, :manage_files),
           },
-          file_menu_tools: file_menu_tools
+          file_menu_tools: file_menu_tools,
+          file_index_menu_tools: file_index_menu_tools
         }
       end
 
@@ -569,7 +572,7 @@ class FilesController < ApplicationController
           attachment.context_module_action(@current_user, :read)
         end
         format.html do
-          if attachment.locked_for?(@current_user)
+          if attachment.locked_for?(@current_user, :check_policies => true)
             render :show, status: :forbidden
           else
             if attachment.inline_content? && !attachment.canvadocable? && safer_domain_available? && !params[:fd_cookie_set]
@@ -878,11 +881,23 @@ class FilesController < ApplicationController
     @attachment = @context.shard.activate{ Attachment.where(context: @context).build }
 
     # service metadata
+    #
+    # NOTE: we're assigning the sha512 value from inst-fs to the md5 column.
+    # this is gross; ideally we'd rename the column to "hash" or "digest"
+    # instead of "md5", because that's how the column is acting now. but
+    # renaming on such a huge table is expensive :(
+    #
+    # TODO we could at least alias the md5 _column_ into a digest _property_
+    # and change code to refer to the digest instead of the md5. that won't
+    # help people that are using the database dump directly, though. they'll
+    # just need to be aware of the disconnect between name and use.
+    #
     @attachment.filename = params[:name]
     @attachment.display_name = params[:display_name] || params[:name]
     @attachment.size = params[:size]
     @attachment.content_type = params[:content_type]
     @attachment.instfs_uuid = params[:instfs_uuid]
+    @attachment.md5 = params[:sha512]
     @attachment.modified_at = Time.zone.now
 
     # check non-exempt quota usage now that we have an actual size
@@ -911,7 +926,7 @@ class FilesController < ApplicationController
         homework_service = Services::SubmitHomeworkService.new(@attachment, progress)
 
         begin
-          homework_service.submit(params[:eula_agreement_timestamp])
+          homework_service.submit(params[:eula_agreement_timestamp], params[:comment])
           homework_service.success!
         rescue => error
           error_id = Canvas::Errors.capture_exception(self.class.name, error)[:error_report]
@@ -1188,11 +1203,43 @@ class FilesController < ApplicationController
     end
   end
 
+  # @API Reset link verifier
+  #
+  # Resets the link verifier. Any existing links to the file using
+  # the previous hard-coded "verifier" parameter will no longer
+  # automatically grant access.
+  #
+  # Must have manage files and become other users permissions
+  #
+  # @example_request
+  #
+  #   curl -X POST 'https://<canvas>/api/v1/files/<file_id>/reset_verifier' \
+  #        -H 'Authorization: Bearer <token>'
+  #
+  # @returns File
+  def reset_verifier
+    @attachment = Attachment.find(params[:id])
+    @context = @attachment.context
+    if can_replace_file?
+      @attachment.reset_uuid!
+      return render json: attachment_json(@attachment, @current_user, {}, {omit_verifier_in_app: true})
+    else
+      return render_unauthorized_action
+    end
+  end
+
   def can_replace_file?
     if @context.is_a?(User)
       @context.can_masquerade?(@current_user, @domain_root_account)
     else
-      @context.grants_right?(@current_user, nil, :manage_files) &&
+      permission_context =
+        case @context
+        when Course, Account, Group
+          @context
+        else
+          @context.respond_to?(:context) ? @context.context : @context
+        end
+      permission_context.grants_right?(@current_user, nil, :manage_files) &&
         @domain_root_account.grants_right?(@current_user, nil, :become_user)
     end
   end

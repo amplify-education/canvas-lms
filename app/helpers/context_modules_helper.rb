@@ -48,7 +48,8 @@ module ContextModulesHelper
   end
 
   def add_menu_tools_to_cache_key(cache_key)
-    tool_key = @menu_tools && @menu_tools.values.flatten.map(&:cache_key).join("/")
+    tool_key = @menu_tools ? @menu_tools.values.flatten.map(&:cache_key).join("/") : ""
+    tool_key += @module_group_tools.to_s if @module_group_tools.present?
     cache_key += Digest::MD5.hexdigest(tool_key) if tool_key.present?
     # should leave it alone if there are no tools
     cache_key
@@ -145,8 +146,16 @@ module ContextModulesHelper
     return module_data
   end
 
-  def module_item_translated_content_type(item)
+  def module_item_translated_content_type(item, is_student=false)
     return '' unless item
+    if item.content_type_class == 'lti-quiz'
+      return is_student ? I18n.t('Quiz') : I18n.t('New Quiz')
+    end
     TRANSLATED_COMMENT_TYPE[item.content_type.to_sym] || I18n.t('Unknown Content Type')
+  end
+
+  def module_item_translated_quiz_type(item, is_student=false)
+    return I18n.t('Item type: New Quiz') if item&.content_type_class == 'lti-quiz' && !is_student
+    I18n.t('Item type: Quiz')
   end
 end

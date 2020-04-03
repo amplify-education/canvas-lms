@@ -513,6 +513,15 @@ returns the current course start date.
 ```
 2018-01-15 00:00:00 -0700
 ```
+## Canvas.course.endAt
+returns the current course end date.
+
+**Availability**: *when launched in a course*  
+
+
+```
+2018-05-01 00:00:00 -0700
+```
 ## Canvas.course.workflowState
 returns the current course workflow state. Workflow states of "claimed" or "created"
 indicate an unpublished course.
@@ -678,6 +687,15 @@ Returns the primary email of the launching user.
 
 ```
 "john.doe@example.com"
+```
+## com.instructure.Person.pronouns
+Returns pronouns for the current user.
+
+**Availability**: *when launched by a logged in user*  
+**Launch Parameter**: *com_instructure_person_pronouns*  
+
+```
+"She/Her"
 ```
 ## vnd.Canvas.Person.email.sis
 Returns the institution assigned email of the launching user.
@@ -1213,16 +1231,16 @@ The submission history LTI2 service endpoint.
 
 ## com.instructure.Course.accept_canvas_resource_types
 Returns the types of resources that can be imported to the current page, forwarded from the request.
-Value is an array of one or more values of: ["assignment", "assignment_group", "audio",
+Value is a comma-separated array of one or more values of: ["assignment", "assignment_group", "audio",
 "discussion_topic", "document", "image", "module", "quiz", "page", "video"].
 
-**Availability**: *always*
-**Launch Parameter**: *com_instructure_course_accept_canvas_resource_types*
+**Availability**: *always*  
+**Launch Parameter**: *com_instructure_course_accept_canvas_resource_types*  
 
 ```
-["page"]
-["module"]
-["assignment", "discussion_topic", "page", "quiz", "module"]
+"page"
+"module"
+"assignment,discussion_topic,page,quiz,module"
 ```
 ## com.instructure.Course.canvas_resource_type
 Returns the target resource type for the current page, forwarded from the request.
@@ -1232,8 +1250,8 @@ Value is the largest logical unit of the page. Possible values are: ["assignment
   on Modules -> 'module'
   and so on.
 
-**Availability**: *always*
-**Launch Parameter**: *com_instructure_course_canvas_resource_type*
+**Availability**: *always*  
+**Launch Parameter**: *com_instructure_course_canvas_resource_type*  
 
 ```
 page
@@ -1242,20 +1260,20 @@ page
 Returns whether a content can be imported into a specific group on the page, forwarded from the request.
 True for Modules page and Assignment Groups page. False for other content index pages.
 
-**Availability**: *always*
-**Launch Parameter**: *com_instructure_course_allow_canvas_resource_selection*
+**Availability**: *always*  
+**Launch Parameter**: *com_instructure_course_allow_canvas_resource_selection*  
 
 ```
 true
 ```
 ## com.instructure.Course.available_canvas_resources
-Returns a list of content groups which can be selected, providing ID and name of each group,
+Returns a JSON-encoded list of content groups which can be selected, providing ID and name of each group,
 forwarded from the request.
 Empty value if com.instructure.Course.allow_canvas_resource_selection is false.
 
-**Availability**: *always*
-**Launch Parameter**: *com_instructure_course_available_canvas_resources*
+**Availability**: *always*  
+**Launch Parameter**: *com_instructure_course_available_canvas_resources*  
 
 ```
-[{"id": "3", name: "First Module"}, {"id": "5", name: "Second Module"]
+[{"id":"3","name":"First Module"},{"id":"5","name":"Second Module"}]
 ```

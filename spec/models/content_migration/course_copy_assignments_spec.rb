@@ -166,7 +166,6 @@ describe ContentMigration do
       expect(unrelated_group.reload.name).not_to eql g.name
     end
 
-
     it "should copy assignment attributes" do
       assignment_model(:course => @copy_from, :points_possible => 40, :submission_types => 'file_upload', :grading_type => 'points')
       @assignment.turnitin_enabled = true
@@ -209,7 +208,7 @@ describe ContentMigration do
           expect(@assignment[attr]).to eq new_assignment[attr]
         end
       end
-      expect(new_assignment.muted).to be_falsey
+      expect(new_assignment.muted).to eq true
       expect(new_assignment.only_visible_to_overrides).to be_falsey
     end
 
@@ -247,6 +246,25 @@ describe ContentMigration do
       run_course_copy
 
       expect(new_assignment.reload.allowed_extensions).to eq []
+    end
+
+    it "should only auto-import into an active assignment group" do
+      assign = @copy_from.assignments.create!
+      run_export_and_import do |export|
+        export.selected_content = { 'assignments' => { mig_id(assign) => "1" } }
+      end
+      group = @copy_to.assignments.first.assignment_group
+      expect(group.name).to eq "Imported Assignments" # hi
+      group.destroy # bye
+
+      assign2 = @copy_from.assignments.create!
+      run_export_and_import do |export|
+        export.selected_content = { 'assignments' => { mig_id(assign2) => "1" } }
+      end
+      new_group = @copy_to.assignments.where(:migration_id => mig_id(assign2)).first.assignment_group
+      expect(new_group).to_not eq group
+      expect(new_group).to be_available
+      expect(new_group.name).to eq "Imported Assignments"
     end
 
     describe "allowed_attempts copying" do
@@ -731,11 +749,11 @@ describe ContentMigration do
         allow(Lti::ToolProxy).to receive(:find_active_proxies_for_context_by_vendor_code_and_product_code) do
           Lti::ToolProxy.where(id: tool_proxy.id)
         end
-        product_family.update_attributes!(
+        product_family.update!(
           product_code: 'product_code',
           vendor_code: 'vendor_code'
         )
-        tool_proxy.update_attributes!(
+        tool_proxy.update!(
           resources: [resource_handler],
           context: @copy_to
         )
@@ -766,6 +784,58 @@ describe ContentMigration do
       it 'sets the custom parameters of the new tool setting' do
         run_course_copy
         expect(Lti::ToolSetting.last.custom_parameters).to eq custom_parameters
+      end
+    end
+
+    context 'post_to_sis' do
+      before :each do
+        @course.root_account.enable_feature!(:new_sis_integrations)
+        @course.root_account.settings[:sis_syncing] = true
+        @course.root_account.settings[:sis_require_assignment_due_date] = true
+        @course.root_account.save!
+      end
+
+      it "should not break trying to copy over an assignment with required due dates but only specified via overrides" do
+        assignment_model(:course => @copy_from, :points_possible => 40, :submission_types => 'file_upload', :grading_type => 'points')
+        assignment_override_model(assignment: @assignment, set_type: 'CourseSection', set_id: @copy_from.default_section.id, due_at: 1.day.from_now)
+        @assignment.only_visible_to_overrides = true
+        @assignment.post_to_sis = true
+        @assignment.due_at = nil
+        @assignment.save!
+
+        run_course_copy(["The Sync to SIS setting could not be enabled for the assignment \"#{@assignment.title}\" without a due date."])
+
+        a_to = @copy_to.assignments.where(:migration_id => mig_id(@assignment)).first
+        expect(a_to.post_to_sis).to eq false
+        expect(a_to).to be_valid
+      end
+
+      it "should not break trying to copy over a graded discussion assignment with required due dates but only specified via overrides" do
+        graded_discussion_topic(:context => @copy_from)
+        assignment_override_model(assignment: @assignment, set_type: 'CourseSection', set_id: @copy_from.default_section.id, due_at: 1.day.from_now)
+        @assignment.only_visible_to_overrides = true
+        @assignment.post_to_sis = true
+        @assignment.due_at = nil
+        @assignment.save!
+
+        run_course_copy(["The Sync to SIS setting could not be enabled for the assignment \"#{@assignment.title}\" without a due date."])
+
+        topic_to = @copy_to.discussion_topics.where(:migration_id => mig_id(@topic)).first
+        expect(topic_to).to be_valid
+        expect(topic_to.assignment.post_to_sis).to eq false
+      end
+
+      it "should be able to copy post_to_sis" do
+        assignment_model(:course => @copy_from, :points_possible => 40, :submission_types => 'file_upload', :grading_type => 'points')
+        @assignment.post_to_sis = true
+        @assignment.due_at = 1.day.from_now
+        @assignment.save!
+
+        run_course_copy
+
+        a_to = @copy_to.assignments.where(:migration_id => mig_id(@assignment)).first
+        expect(a_to.post_to_sis).to eq true
+        expect(a_to).to be_valid
       end
     end
   end

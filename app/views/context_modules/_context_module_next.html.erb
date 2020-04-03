@@ -134,8 +134,8 @@
         <button
           aria-label="<%= t('Add Content to %{module_name}', {module_name: context_module ? context_module.name : 'module'}) %>"
           rel="<%= context_url(@context, :context_url) %>/modules/<%= context_module ? context_module.id : "{{ id }}" %>/items"
-          class="add_module_item_link btn"><i class="icon-plus"></i><span class="screenreader-only"><%= t('Add Content to %{module_name}', {module_name: context_module ? context_module.name : 'module'}) %></span></button>
-        <button class="btn al-trigger" aria-label="<%= t('Manage %{module_name}', {module_name: context_module ? context_module.name : 'module'})  %>">
+          class="add_module_item_link Button--icon-action"><i class="icon-plus"></i><span class="screenreader-only"><%= t('Add Content to %{module_name}', {module_name: context_module ? context_module.name : 'module'}) %></span></button>
+        <button class="Button--icon-action al-trigger" aria-label="<%= t('Manage %{module_name}', {module_name: context_module ? context_module.name : 'module'})  %>">
           <i class="icon-more" aria-hidden="true"></i>
         </button>
         <ul class="al-options">
@@ -171,6 +171,7 @@
               title="<%= t(%{Duplicate this module}) %>"><%= t(%{Duplicate}) %></a>
           </li>
           <%= external_tools_menu_items(@menu_tools[:module_menu], {link_class: "menu_tool_link", settings_key: :module_menu, in_list: true, url_params: {:modules => [context_module ? context_module.id : "{{ id }}"]}}) %>
+          <%= external_tools_menu_items(@module_group_tools, {link_class: "menu_tray_tool_link", settings_key: :module_group_menu, in_list: true}) %>
         </ul>
       <% end %>
       <span style="display: none;">

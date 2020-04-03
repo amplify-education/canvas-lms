@@ -27,6 +27,7 @@ import {
 } from './contentRendering'
 import scroll from '../common/scroll'
 import {defaultImageSize} from './plugins/instructure_image/ImageEmbedOptions'
+import {cleanUrl} from './contentInsertionUtils'
 
 /** * generic content insertion ** */
 
@@ -144,10 +145,10 @@ function decorateLinkWithEmbed(link) {
   const type = link.embed && link.embed.type
   link.class = classnames(link.class, {
     instructure_file_link: true,
-    instructure_scribd_file: type == 'scribd',
-    instructure_image_thumbnail: type == 'image',
-    instructure_video_link: type == 'video',
-    instructure_audio_link: type == 'audio',
+    instructure_scribd_file: type === 'scribd' || link['data-canvas-previewable'],
+    instructure_image_thumbnail: type === 'image',
+    instructure_video_link: type === 'video',
+    instructure_audio_link: type === 'audio',
     auto_open: link.embed && link.embed.autoOpenPreview,
     inline_disabled: link.embed && link.embed.disablePreview
   })
@@ -166,17 +167,21 @@ export function insertLink(editor, link) {
   return insertUndecoratedLink(editor, linkAttrs)
 }
 
-// link edit/create logic copied from tinymce/plugins/link/plugin.js
+// link edit/create logic based on tinymce/plugins/link/plugin.js
 function insertUndecoratedLink(editor, linkAttrs) {
   const selectedElm = editor.selection.getNode()
   const anchorElm = getAnchorElement(editor, selectedElm)
+  const selectedHtml = editor.selection.getContent({format: 'html'})
   if (linkAttrs.target === '_blank') {
     linkAttrs.rel = 'noopener noreferrer'
   }
+  linkAttrs.href = cleanUrl(linkAttrs.href || linkAttrs.url)
 
+  editor.focus()
   if (anchorElm) {
-    editor.focus()
     updateLink(editor, anchorElm, linkAttrs.text, linkAttrs)
+  } else if (selectedHtml) {
+    editor.execCommand('mceInsertLink', null, linkAttrs)
   } else {
     createLink(editor, selectedElm, linkAttrs.text, linkAttrs)
   }

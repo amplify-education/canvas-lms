@@ -25,7 +25,7 @@ module CustomScreenActions
   end
 
   def resize_screen_to_standard
-    driver.manage.window.resize_to(1680,1050)
+    driver.manage.window.maximize
   end
 
   def resize_screen_to_small
@@ -38,6 +38,5 @@ module CustomScreenActions
       driver.close
     end
     driver.switch_to.window(driver.window_handles.first)
-    SeleniumDriverSetup.focus_viewport
   end
 end
