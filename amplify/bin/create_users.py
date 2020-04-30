@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# Looks up user KC business keys by user email, outputs email and bk to file, and resets pwd for each user.
+# Adds users to the Canvas dev instance based on emails in a file, one per line.
 # pip install asyncio aiohttp[speedups] aiofiles
-# ./create_users.py --users_file ./tmp/teacher.csv --env staging --email_bk_outfile email_bk_teacher.csv
+# ./create_users.py --users_file ./users.txt --token <token>
+# To get a token see https://canvas.instructure.com/doc/api/file.oauth.html#manual-token-generation
 from os import path
 import time
 import argparse
@@ -118,7 +119,7 @@ if __name__ == "__main__":
         epilog='ex: python3 create_users.py --account Amplify --users_file my_users.txt --debug --token <token>'
     )
     parser.add_argument('--account', default='Amplify', help="The name of the account the users should be created in. If int, assumes it is an id.")
-    parser.add_argument('--token', help="The env specific KC service user password")
+    parser.add_argument('--token', help="The env specific KC service user password (https://canvas.instructure.com/doc/api/file.oauth.html#manual-token-generation)")
     parser.add_argument('--users_file', help='Path to file of email addresses representing users to create.')
     parser.add_argument('--max_connections', default=MAX_CONNECTIONS, type=int,
                         help='Max number of connections to have open simultaneously. Should be used to throttle.')
