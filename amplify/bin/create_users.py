@@ -13,7 +13,7 @@ import aiofiles
 import logging
 import getpass
 
-MAX_CONNECTIONS = 2   # limit amount of simultaneously opened connections
+MAX_CONNECTIONS = 3   # limit amount of simultaneously opened connections
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30.0 * 60.0)  # 30 mins
 LOG_INTERVAL = 2  # in secs
 DNS_CACHE_TIME = 3600  # 1 hour, load balancer IP addr shouldn't change
