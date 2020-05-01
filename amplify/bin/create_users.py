@@ -83,11 +83,12 @@ async def create_user(conn, token, account_id, email):
     logger.debug(f'POST: {url}\n{headers}/n{body}')
     async with aiohttp.request('post', url, json=body, headers=headers,
                                connector=conn, timeout=REQUEST_TIMEOUT) as response:
-        if response.status != 200:
-            logger.error(response)
-            raise Exception(response)
-        users_created_count += 1
-        write_counts()
+        if response.status == 200:
+            users_created_count += 1
+            write_counts()
+        else:
+            logger.error(f'Unable to create user {email}')
+            logger.debug(response)
 
 
 async def main(account, users_path, token, max_conn):
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     # Instantiate the parser
     parser = argparse.ArgumentParser(
         description='Creates users in our Canvas dev instance in the specified account based on email address.',
-        epilog='ex: python3 create_users.py --account Amplify --users_file my_users.txt --debug --token <token>'
+        epilog='ex: python3 create_users.py --account Amplify --users_file canvas_dev_users.txt --debug --token <token>'
     )
     parser.add_argument('--account', default='Amplify', help="The name of the account the users should be created in. If int, assumes it is an id.")
     parser.add_argument('--token', help="The env specific KC service user password (https://canvas.instructure.com/doc/api/file.oauth.html#manual-token-generation)")
