@@ -548,6 +548,7 @@ class Submission < ActiveRecord::Base
   end
 
   def can_read_submission_user_name?(user, session)
+    return false if self.assignment.anonymize_students?
     !self.assignment.anonymous_peer_reviews? ||
         self.user_id == user.id ||
         self.assignment.context.grants_right?(user, session, :view_all_grades)
@@ -1333,6 +1334,7 @@ class Submission < ActiveRecord::Base
   def infer_values
     if assignment
       self.context_code = assignment.context_code
+      self.course_id = assignment.context_id
     end
 
     self.seconds_late_override = nil unless late_policy_status == 'late'
@@ -1675,7 +1677,7 @@ class Submission < ActiveRecord::Base
   # use this method to pre-load the versioned_attachments for a bunch of
   # submissions (avoids having O(N) attachment queries)
   # NOTE: all submissions must belong to the same shard
-  def self.bulk_load_versioned_attachments(submissions, preloads: [:thumbnail, :media_object])
+  def self.bulk_load_versioned_attachments(submissions, preloads: [:thumbnail, :media_object, :folder, :attachment_upload_statuses])
     attachment_ids_by_submission_and_index = group_attachment_ids_by_submission_and_index(submissions)
     bulk_attachment_ids = attachment_ids_by_submission_and_index.values.flatten
 
@@ -2322,9 +2324,6 @@ class Submission < ActiveRecord::Base
     res
   end
 
-  def course_id=(val)
-  end
-
   def to_param
     user_id
   end
@@ -2669,6 +2668,18 @@ class Submission < ActiveRecord::Base
     else
       nil
     end
+  end
+
+  def root_account_id
+    # TODO this is a substitute for the root_account_id column
+    # and the root_account attribute, which will eventually be added
+    self.assignment&.root_account_id
+  end
+
+  def root_account
+    # TODO this is a substitute for the root_account attribute,
+    # which will eventually be added
+    self.assignment&.root_account
   end
 
   private

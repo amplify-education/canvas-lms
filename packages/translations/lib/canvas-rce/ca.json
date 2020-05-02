@@ -3,6 +3,7 @@
     "message": "Verificador d''accessibilitat"
   },
   "add_8523c19b": { "message": "Afegeix" },
+  "add_another_f4e50d57": { "message": "Afegeix-ne un altre" },
   "add_cc_subtitles_55f0394e": { "message": "Afegeix CC/subtítols" },
   "align_11050992": { "message": "Alinea" },
   "align_center_ca078feb": { "message": "Alineació centrada" },
@@ -14,6 +15,12 @@
   "alt_text_611fb322": { "message": "Text alternatiu" },
   "an_error_occurred_generating_the_file_preview_cf259955": {
     "message": "S''ha produït un error en generar la visualització prèvia del fitxer"
+  },
+  "an_error_occurred_making_a_network_request_d1bda348": {
+    "message": "S''ha produït un error en realitzar una sol·licitud de xarxa"
+  },
+  "an_error_occurred_uploading_your_media_71f1444d": {
+    "message": "S''ha produït un error en carregar l''element multimèdia."
   },
   "announcement_list_da155734": { "message": "Llista d''anuncis" },
   "announcements_a4b8ed4a": { "message": "Anuncis" },
@@ -28,9 +35,13 @@
   "audio_player_for_title_20cc70d": {
     "message": "Reproductor de so per a { title }"
   },
+  "auto_saved_content_exists_would_you_like_to_load_t_fee528f2": {
+    "message": "Existeix contingut desat automàticament. Voleu carregar el contingut desat automàticament al seu lloc?"
+  },
   "automatically_open_an_in_line_preview_preview_disp_ed784ffe": {
     "message": "Obre automàticament una visualització prèvia en línia. (La visualització prèvia només es mostra després de desar)"
   },
+  "available_folders_694d0436": { "message": "Carpetes disponibles" },
   "cancel_caeb1e68": { "message": "Cancel·la" },
   "canvas_plugins_705a5016": { "message": "Connectors de Canvas" },
   "choose_caption_file_9c45bc4e": { "message": "Tria un fitxer de subtítols" },
@@ -40,14 +51,23 @@
   "clear_selected_file_82388e50": {
     "message": "Esborra el fitxer seleccionat"
   },
+  "clear_selected_file_filename_2fe8a58e": {
+    "message": "Esborra el fitxer seleccionat: { filename }"
+  },
   "click_any_page_to_insert_a_link_to_that_page_ac920c02": {
     "message": "Feu clic a qualsevol pàgina per inserir un enllaç a la pàgina en qüestió."
   },
   "click_to_embed_imagename_c41ea8df": {
     "message": "Feu clic per integrar { imageName }"
   },
+  "click_to_hide_preview_3c707763": {
+    "message": "Feu clic per amagar la visualització prèvia"
+  },
   "click_to_insert_a_link_into_the_editor_c19613aa": {
     "message": "Feu clic per inserir un enllaç en l''editor."
+  },
+  "click_to_show_preview_faa27051": {
+    "message": "Feu clic per mostrar la visualització prèvia"
   },
   "close_a_menu_or_dialog_also_returns_you_to_the_edi_739079e6": {
     "message": "Tanca un menú o un quadre de diàleg També us torna a l''àrea d''editor"
@@ -71,6 +91,7 @@
   },
   "course_documents_104d76e0": { "message": "Documents del curs" },
   "course_files_62deb8f8": { "message": "Fitxers del curs" },
+  "course_files_a31f97fc": { "message": "Fitxers del curs" },
   "course_images_f8511d04": { "message": "Imatges del curs" },
   "course_links_b56959b9": { "message": "Enllaços del curs" },
   "course_media_ec759ad": { "message": "Elements multimèdia del curs" },
@@ -87,6 +108,7 @@
   },
   "describe_the_image_e65d2e32": { "message": "(Descriu la imatge)" },
   "describe_the_video_2fe8f46a": { "message": "(Descriu el vídeo)" },
+  "details_98a31b68": { "message": "Detalls" },
   "dimensions_45ddb7b7": { "message": "Mides" },
   "directionality_ebcae6d0": { "message": "direccionalitat" },
   "disable_in_line_preview_2a675175": {
@@ -98,6 +120,7 @@
   "display_text_link_opens_in_a_new_tab_75e9afc9": {
     "message": "Mostra l''enllaç al text (s''obre en una pestanya nova)"
   },
+  "document_678cd7bf": { "message": "Document" },
   "documents_81393201": { "message": "Documents" },
   "done_54e3d4b6": { "message": "Fet" },
   "drag_a_file_here_1bf656d5": { "message": "Arrossega un fitxer aquí" },
@@ -124,6 +147,8 @@
   "embed_preview_2d741e1f": { "message": "Integra la visualització prèvia" },
   "embed_video_a97a64af": { "message": "Integra el vídeo" },
   "embed_video_code_703e10f2": { "message": "Integra el codi del vídeo" },
+  "embedded_content_aaeb4d3d": { "message": "contingut incrustat" },
+  "equation_1c5ac93c": { "message": "Equació" },
   "error_uploading_video_audio_recording_16d9730a": {
     "message": "S''ha produït un error en carregar l''enregistrament de vídeo o so"
   },
@@ -131,6 +156,10 @@
   "external_links_3d9f074e": { "message": "Enllaços externs" },
   "extra_large_b6cdf1ff": { "message": "Extragran" },
   "file_name_8fd421ff": { "message": "Nom del fitxer" },
+  "file_upload_failed_af22dd91": {
+    "message": "No s''ha pogut carregar el fitxer"
+  },
+  "file_uploading_56c9c0c8": { "message": "S''està carregant el fitxer" },
   "file_url_c12b64be": { "message": "URL del fitxer" },
   "filename_file_icon_602eb5de": { "message": "Icona del fitxer { filename }" },
   "filename_image_preview_6cef8f26": {
@@ -145,7 +174,11 @@
   "focus_the_popup_context_toolbar_7979f4f8": {
     "message": "Centreu-vos en la barra d''eines de context que es mostra en una finestra emergent"
   },
+  "folder_tree_fbab0726": { "message": "Arbre de carpetes" },
   "formatting_5b143aa8": { "message": "S''està formatant" },
+  "found_auto_saved_content_3f6e4ca5": {
+    "message": "S''ha trobat contingut desat automàticament"
+  },
   "found_count_plural_0_results_one_result_other_resu_46aeaa01": {
     "message": "S''han trobat { count, plural,\n     =0 {# resultats}\n    one {# resultat}\n  other {# resultats}\n}"
   },
@@ -160,15 +193,18 @@
   },
   "grades_a61eba0a": { "message": "Qualificacions" },
   "group_files_4324f3df": { "message": "Fitxers del grup" },
+  "group_files_82e5dcdb": { "message": "Fitxers del grup" },
   "group_navigation_99f191a": { "message": "Navegació del grup" },
   "heading_2_5b84eed2": { "message": "Capçalera 2" },
   "heading_3_2c83de44": { "message": "Capçalera 3" },
   "heading_4_b2e74be7": { "message": "Capçalera 4" },
   "height_69b03e15": { "message": "Altura" },
+  "image_8ad06": { "message": "Imatge" },
   "image_options_5412d02c": { "message": "Opcions d''imatge" },
   "image_options_tray_90a46006": { "message": "Safata d''opcions d''imatge" },
   "images_7ce26570": { "message": "Imatges" },
   "increase_indent_6d550a4a": { "message": "Augmenta la sagnia" },
+  "insert_593145ef": { "message": "Insereix" },
   "insert_equella_links_49a8dacd": { "message": "Insereix enllaços a Equella" },
   "insert_link_6dc23cae": { "message": "Insereix un enllaç" },
   "insert_math_equation_57c6e767": {
@@ -194,9 +230,11 @@
   "loading_bde52856": { "message": "S''està carregant" },
   "loading_failed_b3524381": { "message": "No s''ha pogut carregar…" },
   "loading_failed_e6a9d8ef": { "message": "No s''ha pogut carregar." },
+  "loading_folders_d8b5869e": { "message": "S''estan carregant les carpetes" },
   "loading_media_f3455841": {
     "message": "S''està carregant l''element multimèdia"
   },
+  "locked_762f138b": { "message": "Bloquejat" },
   "media_af190855": { "message": "Element multimèdia" },
   "medium_5a8e9ead": { "message": "Mitjà" },
   "mic_a7f3d311": { "message": "Micròfon" },
@@ -207,6 +245,7 @@
   "must_be_at_least_width_x_height_px_41dc825e": {
     "message": "Ha de ser de { width } × { height }píxels com a mínim"
   },
+  "my_files_2f621040": { "message": "Els meus fitxers" },
   "navigate_through_the_menu_or_toolbar_415a4e50": {
     "message": "Navegueu pel menú o per la barra d''eines"
   },
@@ -214,6 +253,8 @@
   "no_alt_text_decorative_image_f318fc0e": {
     "message": "Sense text alternatiu (imatge decorativa)"
   },
+  "no_e16d9132": { "message": "No" },
+  "no_file_chosen_9a880793": { "message": "No s''ha triat cap fitxer" },
   "no_results_940393cf": { "message": "Sense resultats." },
   "no_results_found_for_filterterm_ad1b04c8": {
     "message": "No s''ha trobat cap resultat per a { filterTerm }"
@@ -242,6 +283,7 @@
   },
   "posted_when_a578f5ab": { "message": "Publicat: { when }" },
   "preformatted_d0670862": { "message": "Amb format previ" },
+  "preview_53003fd2": { "message": "Visualització prèvia" },
   "preview_a3f8f854": { "message": "VISUALITZACIÓ PRÈVIA" },
   "previous_page_928fc112": { "message": "Pàgina anterior" },
   "published_c944a23d": { "message": "publicat" },
@@ -253,6 +295,9 @@
   },
   "recording_98da6bda": { "message": "S''està enregistrant" },
   "remove_link_d1f2f4d0": { "message": "Elimina l''enllaç" },
+  "restore_auto_save_deccd84b": {
+    "message": "Voleu restaurar el contingut desat automàticament?"
+  },
   "rich_content_editor_2708ef21": { "message": "Editor de contingut enriquit" },
   "right_to_left_ec223c81": { "message": "de dreta a esquerra" },
   "save_11a80ec3": { "message": "Desa" },
@@ -274,6 +319,7 @@
   "something_went_wrong_and_i_don_t_know_what_to_show_e0c54ec8": {
     "message": "Alguna cosa no ha anat bé i no sé què puc mostrar-te."
   },
+  "something_went_wrong_d238c551": { "message": "Alguna cosa no ha anat bé" },
   "something_went_wrong_try_again_after_refreshing_th_e094eb8d": {
     "message": "Alguna cosa no ha anat bé; torneu a provar-ho després d''actualitzar la pàgina"
   },
@@ -289,7 +335,13 @@
   "styles_2aa721ef": { "message": "Estils" },
   "submit_a3cc6859": { "message": "Entrega" },
   "subscript_59744f96": { "message": "Subíndex" },
+  "success_file_uploaded_8174e93f": {
+    "message": "Operació correcta: S''ha carregat el fitxer"
+  },
   "superscript_8cb349a2": { "message": "Superíndex" },
+  "supported_file_types_srt_or_webvtt_7d827ed": {
+    "message": "Tipus de fitxer admesos: SRT o WebVTT"
+  },
   "switch_to_raw_html_editor_4c9ac7de": {
     "message": "Canvia a un editor de dades HTML sense processar"
   },
@@ -321,10 +373,12 @@
   "unpublished_dfd8801": { "message": "no publicat" },
   "untitled_16aa4f2b": { "message": "Sense títol" },
   "upload_document_253f0478": { "message": "Penja un document" },
-  "upload_error_f9c00e27": { "message": "Error en penjar" },
   "upload_file_fd2361b8": { "message": "Penja el fitxer" },
   "upload_image_6120b609": { "message": "Penja una imatge" },
   "upload_media_ce31135a": { "message": "Penja l''element multimèdia" },
+  "upload_not_available_for_this_folder_8f8623c6": {
+    "message": "La càrrega no està disponible per a aquesta carpeta"
+  },
   "upload_record_media_e4207d72": {
     "message": "Penja o enregistra l''element multimèdia"
   },
@@ -365,6 +419,7 @@
   },
   "width_x_height_px_ff3ccb93": { "message": "{ width } × { height }píxels" },
   "wiki_home_9cd54d0": { "message": "Pàgina d''inici de Wiki" },
+  "yes_dde87d5": { "message": "Sí" },
   "your_webcam_may_already_be_in_use_6cd64c25": {
     "message": "És possible que la càmera web ja s''estigui utilitzant."
   }

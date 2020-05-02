@@ -160,7 +160,7 @@ describe UserLearningObjectScopes do
       end
 
       it "should include assignments with lock_at in the future" do
-        @quiz.lock_at = 1.hour.from_now
+        @quiz.lock_at = 3.days.from_now
         @quiz.save!
         DueDateCacher.recompute(@quiz.assignment)
         list = @student.assignments_for_student('submitting', contexts: [@course])
@@ -176,6 +176,7 @@ describe UserLearningObjectScopes do
       end
 
       it "should not include assignments where lock_at is in past" do
+        @quiz.due_at = 2.hours.ago
         @quiz.lock_at = 1.hour.ago
         @quiz.save!
         DueDateCacher.recompute(@quiz.assignment)
@@ -192,6 +193,7 @@ describe UserLearningObjectScopes do
         end
 
         it "should include assignments where lock_at is in past" do
+          @quiz.due_at = 2.hours.ago
           @quiz.lock_at = 1.hour.ago
           @quiz.save!
           DueDateCacher.recompute(@quiz.assignment)
@@ -739,6 +741,22 @@ describe UserLearningObjectScopes do
         end
       end
 
+      it "should work when submissions course ids are populated" do
+        Setting.set('course_id_populated_on_submissions', 'true')
+        expect(@teacher.course_id_populated_on_submissions?).to eq true
+        [Shard.default, @shard1, @shard2].each do |shard|
+          shard.activate do
+            expect(@teacher.assignments_needing_grading.sort_by(&:id)).to eq(
+              [@course1.assignments.first, @course2.assignments.first, @assignment3].sort_by(&:id)
+            )
+            Setting.set('assignments_needing_grading_b', 'false')
+            expect(@teacher.assignments_needing_grading.sort_by(&:id)).to eq(
+              [@course1.assignments.first, @course2.assignments.first, @assignment3].sort_by(&:id)
+            )
+          end
+        end
+      end
+
       it "should honor ignores for a separate shard" do
         @teacher.ignore_item!(@assignment3, 'grading')
         expect(@teacher.assignments_needing_grading.sort_by(&:id)).to eq(
@@ -754,6 +772,16 @@ describe UserLearningObjectScopes do
 
       it "should apply a global limit" do
         expect(@teacher.assignments_needing_grading(:limit => 1).length).to eq 1
+      end
+
+      it 'should not fail with the dynamic setting turned off' do
+        [Shard.default, @shard1, @shard2].each do |shard|
+          shard.activate do
+            override_dynamic_settings(private: { canvas: { disable_needs_grading_queries: true } }) do
+              expect(@teacher.assignments_needing_grading).to eq []
+            end
+          end
+        end
       end
     end
 

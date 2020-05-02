@@ -300,4 +300,43 @@ describe ProfileController do
       end
     end
   end
+
+  describe "GET #qr_mobile_login" do
+    context "mobile_qr_login flag is enabled" do
+      before :once do
+        Account.default.enable_feature! :mobile_qr_login
+      end
+
+      it "should render empty html layout" do
+        user_session(@user)
+        get "qr_mobile_login"
+        expect(response).to render_template "layouts/application"
+        expect(response.body).to eq ""
+      end
+
+      it "should redirect to login if no active session" do
+        get "qr_mobile_login"
+        expect(response).to redirect_to "/login"
+      end
+
+      it "should 404 if IMP is missing" do
+        allow_any_instance_of(ProfileController).to receive(:instructure_misc_plugin_available?).and_return(false)
+        user_session(@user)
+        get "qr_mobile_login"
+        expect(response).to be_not_found
+      end
+    end
+
+    context "mobile_qr_login flag is disabled" do
+      before :once do
+        Account.default.disable_feature! :mobile_qr_login
+      end
+
+      it "should 404" do
+        user_session(@user)
+        get "qr_mobile_login"
+        expect(response).to be_not_found
+      end
+    end
+  end
 end

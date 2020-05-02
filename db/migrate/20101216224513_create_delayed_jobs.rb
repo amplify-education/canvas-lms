@@ -52,6 +52,7 @@ class CreateDelayedJobs < ActiveRecord::Migration[4.2]
       table.string   :strand
       table.boolean  :next_in_strand, :default => true, :null => false
       table.integer  :shard_id, :limit => 8
+      table.string   :source
     end
 
     connection.execute("CREATE INDEX get_delayed_jobs_index ON #{Delayed::Backend::ActiveRecord::Job.quoted_table_name} (priority, run_at) WHERE locked_at IS NULL AND queue = 'canvas_queue' AND next_in_strand = 't'")
@@ -59,6 +60,7 @@ class CreateDelayedJobs < ActiveRecord::Migration[4.2]
     add_index :delayed_jobs, %w(strand id), :name => 'index_delayed_jobs_on_strand'
     add_index :delayed_jobs, :locked_by, :where => "locked_by IS NOT NULL"
     add_index :delayed_jobs, %w[run_at tag]
+    add_index :delayed_jobs, :shard_id
 
     # use an advisory lock based on the name of the strand, instead of locking the whole table
     # note that we're using half of the md5, so collisions are possible, but we don't really
@@ -112,7 +114,6 @@ class CreateDelayedJobs < ActiveRecord::Migration[4.2]
       t.integer  "priority",    :default => 0
       t.integer  "attempts",    :default => 0
       t.string   "handler",     :limit => 512000
-      t.integer  "original_id", :limit => 8
       t.text     "last_error"
       t.string   "queue"
       t.datetime "run_at"
@@ -125,6 +126,8 @@ class CreateDelayedJobs < ActiveRecord::Migration[4.2]
       t.integer  "max_attempts"
       t.string   "strand"
       t.integer  "shard_id", :limit => 8
+      t.integer  "original_job_id", :limit => 8
+      t.string   "source"
     end
   end
 

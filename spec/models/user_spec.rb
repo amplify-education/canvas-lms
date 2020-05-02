@@ -769,6 +769,19 @@ describe User do
         @user.favorites.create!(:context => @course)
         expect(@user.courses_with_primary_enrollment(:favorite_courses)).to eq [@course]
       end
+
+      it "loads the roles correctly" do
+        @user = User.create!(:name => 'user')
+        @shard1.activate do
+          account = Account.create!
+          @course = account.courses.create!(:workflow_state => 'available')
+          @role = account.roles.create!(:name => "custom student", :base_role_type => "StudentEnrollment")
+          StudentEnrollment.create!(:course => @course, :user => @user, :workflow_state => 'active', :role => @role)
+        end
+        fetched_courses = @user.courses_with_primary_enrollment(:current_and_invited_courses, nil, :include_completed_courses => true)
+        expect(fetched_courses.count).to eq 1
+        expect(fetched_courses.first.primary_enrollment_role).to eq @role
+      end
     end
   end
 
@@ -3230,6 +3243,16 @@ describe User do
       it "returns true" do
         expect(user.prefers_no_celebrations?).to eq true
       end
+    end
+  end
+
+  describe "with_last_login" do
+    it "should not double the users select if select values are already present" do
+      expect(User.all.order_by_sortable_name.with_last_login.to_sql.scan(".*").count).to eq 1
+    end
+
+    it "should still include it if select values aren't present" do
+      expect(User.all.with_last_login.to_sql.scan(".*").count).to eq 1
     end
   end
 end

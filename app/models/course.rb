@@ -30,7 +30,7 @@ class Course < ActiveRecord::Base
   include Courses::ItemVisibilityHelper
   include OutcomeImportContext
 
-  attr_accessor :teacher_names, :master_course
+  attr_accessor :teacher_names, :master_course, :primary_enrollment_role
   attr_writer :student_count, :teacher_count, :primary_enrollment_type, :primary_enrollment_role_id, :primary_enrollment_rank, :primary_enrollment_state, :primary_enrollment_date, :invitation, :master_migration
 
   time_zone_attribute :time_zone
@@ -204,6 +204,8 @@ class Course < ActiveRecord::Base
   has_many :assignment_post_policies, -> { where.not(assignment_id: nil) }, class_name: 'PostPolicy', inverse_of: :course
   has_one :default_post_policy, -> { where(assignment_id: nil) }, class_name: 'PostPolicy', inverse_of: :course
 
+  has_one :course_score_statistic, dependent: :destroy
+
   prepend Profile::Association
 
   before_save :assign_uuid
@@ -360,11 +362,13 @@ class Course < ActiveRecord::Base
 
   def sequential_module_item_ids
     Rails.cache.fetch(['ordered_module_item_ids', self].cache_key) do
-      self.context_module_tags.not_deleted.joins(:context_module).
-        where("context_modules.workflow_state <> 'deleted'").
-        where("content_tags.content_type <> 'ContextModuleSubHeader'").
-        reorder(Arel.sql("COALESCE(context_modules.position, 0), context_modules.id, content_tags.position NULLS LAST")).
-        pluck(:id)
+      Shackles.activate(:slave) do
+        self.context_module_tags.not_deleted.joins(:context_module).
+          where("context_modules.workflow_state <> 'deleted'").
+          where("content_tags.content_type <> 'ContextModuleSubHeader'").
+          reorder(Arel.sql("COALESCE(context_modules.position, 0), context_modules.id, content_tags.position NULLS LAST")).
+          pluck(:id)
+      end
     end
   end
 
@@ -739,6 +743,10 @@ class Course < ActiveRecord::Base
     current_users
   end
 
+  def potential_collaborators_for(current_user)
+    users_visible_to(current_user)
+  end
+
   def broadcast_data
     { course_id: id, root_account_id: root_account_id }
   end
@@ -782,34 +790,36 @@ class Course < ActiveRecord::Base
   end
 
   def instructors_in_charge_of(user_id, require_grade_permissions: true)
-    scope = current_enrollments.
-      where(:course_id => self, :user_id => user_id).
-      where("course_section_id IS NOT NULL")
-    section_ids = scope.distinct.pluck(:course_section_id)
+    Shackles.activate(:slave) do
+      scope = current_enrollments.
+        where(:course_id => self, :user_id => user_id).
+        where("course_section_id IS NOT NULL")
+      section_ids = scope.distinct.pluck(:course_section_id)
 
-    instructor_enrollment_scope = self.instructor_enrollments.active_by_date
-    if section_ids.any?
-      instructor_enrollment_scope = instructor_enrollment_scope.where("enrollments.limit_privileges_to_course_section IS NULL OR
-        enrollments.limit_privileges_to_course_section<>? OR enrollments.course_section_id IN (?)", true, section_ids)
-    end
+      instructor_enrollment_scope = self.instructor_enrollments.active_by_date
+      if section_ids.any?
+        instructor_enrollment_scope = instructor_enrollment_scope.where("enrollments.limit_privileges_to_course_section IS NULL OR
+          enrollments.limit_privileges_to_course_section<>? OR enrollments.course_section_id IN (?)", true, section_ids)
+      end
 
-    if require_grade_permissions
-      # filter to users with view_all_grades or manage_grades permission
-      role_user_ids = instructor_enrollment_scope.pluck(:role_id, :user_id)
-      return [] unless role_user_ids.any?
-      role_ids = role_user_ids.map(&:first).uniq
+      if require_grade_permissions
+        # filter to users with view_all_grades or manage_grades permission
+        role_user_ids = instructor_enrollment_scope.pluck(:role_id, :user_id)
+        return [] unless role_user_ids.any?
+        role_ids = role_user_ids.map(&:first).uniq
 
-      roles = Role.where(:id => role_ids).to_a
-      allowed_role_ids = roles.select{|role|
-        [:view_all_grades, :manage_grades].any?{|permission| RoleOverride.enabled_for?(self, permission, role, self).include?(:self) }
-      }.map(&:id)
-      return [] unless allowed_role_ids.any?
+        roles = Role.where(:id => role_ids).to_a
+        allowed_role_ids = roles.select{|role|
+          [:view_all_grades, :manage_grades].any?{|permission| RoleOverride.enabled_for?(self, permission, role, self).include?(:self) }
+        }.map(&:id)
+        return [] unless allowed_role_ids.any?
 
-      allowed_user_ids = Set.new
-      role_user_ids.each{|role_id, user_id| allowed_user_ids << user_id if allowed_role_ids.include?(role_id)}
-      User.where(:id => allowed_user_ids).to_a
-    else
-      User.where(:id => instructor_enrollment_scope.select(:id)).to_a
+        allowed_user_ids = Set.new
+        role_user_ids.each{|role_id, user_id| allowed_user_ids << user_id if allowed_role_ids.include?(role_id)}
+        User.where(:id => allowed_user_ids).to_a
+      else
+        User.where(:id => instructor_enrollment_scope.select(:id)).to_a
+      end
     end
   end
 
@@ -949,7 +959,6 @@ class Course < ActiveRecord::Base
   end
 
   def assert_defaults
-    self.tab_configuration ||= [] unless self.tab_configuration == []
     self.name = nil if self.name && self.name.strip.empty?
     self.name ||= t('missing_name', "Unnamed Course")
     self.course_code = nil if self.course_code == ''
@@ -2635,7 +2644,12 @@ class Course < ActiveRecord::Base
   end
 
   def tab_configuration
-    super.map {|h| h.with_indifferent_access } rescue []
+    # `account_id.present?` is there to prevent a failure in `feature_enabled?`
+    # if an account hasn't been set on the course yet
+    if account_id.present? && feature_enabled?(:canvas_k6_theme) && super.nil?
+      return canvas_k6_tab_configuration.map(&:with_indifferent_access)
+    end
+    super.map(&:with_indifferent_access) rescue []
   end
 
   TAB_HOME = 0
@@ -2656,6 +2670,8 @@ class Course < ActiveRecord::Base
   TAB_COLLABORATIONS = 16
   TAB_COLLABORATIONS_NEW = 17
   TAB_RUBRICS = 18
+
+  CANVAS_K6_TAB_IDS = [TAB_HOME, TAB_ANNOUNCEMENTS, TAB_GRADES, TAB_MODULES].freeze
 
   def self.default_tabs
     [{
@@ -3325,8 +3341,12 @@ class Course < ActiveRecord::Base
     user.favorites.where(:context_type => 'Course', :context_id => self).exists?
   end
 
+  def preloaded_nickname?
+    !!defined?(@preloaded_nickname)
+  end
+
   def nickname_for(user, fallback = :name)
-    nickname = defined?(@preloaded_nickname) ? @preloaded_nickname : (user && user.course_nickname(self))
+    nickname = preloaded_nickname? ? @preloaded_nickname : (user && user.course_nickname(self))
     nickname ||= self.send(fallback) if fallback
     nickname
   end
@@ -3340,13 +3360,13 @@ class Course < ActiveRecord::Base
     @nickname = nickname_for(user, nil)
   end
 
-  def self.preload_menu_data_for(courses, user)
+  def self.preload_menu_data_for(courses, user, preload_favorites: false)
     ActiveRecord::Associations::Preloader.new.preload(courses, :enrollment_term)
     # preload favorites and nicknames
-    favorite_ids = user.account.feature_enabled?(:unfavorite_course_from_dashboard) ? user.favorite_context_ids("Course") : []
+    favorite_ids = preload_favorites && user.favorite_context_ids("Course")
     nicknames = user.all_course_nicknames(courses)
     courses.each do |course|
-      course.preloaded_favorite = favorite_ids.include?(course.id)
+      course.preloaded_favorite = favorite_ids.include?(course.id) if favorite_ids
       course.preloaded_nickname = nicknames[course.id]
     end
   end
@@ -3526,5 +3546,10 @@ class Course < ActiveRecord::Base
     return if default_post_policy.present?
 
     create_default_post_policy(assignment: nil, post_manually: false)
+  end
+
+  def canvas_k6_tab_configuration
+    visible, hidden = Course.default_tabs.partition {|tab| CANVAS_K6_TAB_IDS.include?(tab[:id])}
+    [*visible, *hidden.tap {|tabs| tabs.each{|t| t[:hidden]=true }}]
   end
 end

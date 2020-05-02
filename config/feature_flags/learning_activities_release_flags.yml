@@ -29,9 +29,14 @@ assignment_attempts:
   description: Allow a teacher to set the number of allowed attempts on an assignment via the UI
 assignment_bulk_edit:
   state: hidden
-  applies_to: SiteAdmin
+  applies_to: RootAccount
   display_name: Assignment Bulk Editing
   description: Allow teachers to change the dates on a set of assignments in one step
+assignment_bulk_edit_phase_2:
+  state: hidden
+  applies_to: SiteAdmin
+  display_name: Assignment Bulk Editing phase 2
+  description: Turns on phase 2 features for Assignment Bulk Editing
 bookmarking_for_enrollments_index:
   state: allowed
   applies_to: RootAccount
@@ -62,4 +67,4 @@ enable_fullstory:
   display_name: Enable fullstory
   description: |-
     Include FullStory recording of the user's session
-  applies_to: RootAccount
+  applies_to: SiteAdmin

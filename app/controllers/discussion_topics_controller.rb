@@ -315,6 +315,8 @@ class DiscussionTopicsController < ApplicationController
     # cross-shard compatible.
     @context.shard.activate do
       scope = DiscussionTopic::ScopedToUser.new(@context, @current_user, scope).scope
+      # see context for this separation in ScopedToSections
+      scope = DiscussionTopic::ScopedToSections.for(self, @context, @current_user, scope).scope
     end
 
     scope = if params[:order_by] == 'recent_activity'
@@ -772,8 +774,10 @@ class DiscussionTopicsController < ApplicationController
 
             js_hash = {:DISCUSSION => env_hash}
             if @context.is_a?(Course)
-              js_hash[:TOTAL_USER_COUNT] = @topic.context.enrollments.not_fake.
-                active_or_pending_by_date_ignoring_access.distinct.count(:user_id)
+              Shackles.activate(:slave) do
+                js_hash[:TOTAL_USER_COUNT] = @topic.context.enrollments.not_fake.
+                  active_or_pending_by_date_ignoring_access.distinct.count(:user_id)
+              end
             end
             js_hash[:COURSE_ID] = @context.id if @context.is_a?(Course)
             js_hash[:CONTEXT_ACTION_SOURCE] = :discussion_topic

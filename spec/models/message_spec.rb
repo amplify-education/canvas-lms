@@ -299,12 +299,26 @@ describe Message do
     end
 
     it "logs stats on deliver" do
+      account = account_model
+      @message = message_model(dispatch_at: Time.now - 1,
+                               notification_name: 'my_name',
+                               workflow_state: 'staged',
+                               to: 'somebody',
+                               updated_at: Time.now.utc - 11.minutes,
+                               path_type: 'email',
+                               user: @user,
+                               root_account: account)
+
+
       expect(InstStatsd::Statsd).to receive(:increment).with("message.deliver.email.my_name",
                                                              {short_stat: "message.deliver",
                                                               tags: {path_type: "email", notification_name: 'my_name'}})
 
-      message = message_model(dispatch_at: Time.now - 1, notification_name: 'my_name', workflow_state: 'staged', to: 'somebody', updated_at: Time.now.utc - 11.minutes, path_type: 'email', user: @user)
-      expect(message).to receive(:dispatch).and_return(true)
+      expect(InstStatsd::Statsd).to receive(:increment).with("message.deliver.email.#{@message.root_account.global_id}",
+                                                             {short_stat: "message.deliver_per_account",
+                                                              tags: {path_type: "email", root_account_id: @message.root_account.global_id}})
+
+      expect(@message).to receive(:dispatch).and_return(true)
       @message.deliver
     end
 
@@ -379,6 +393,22 @@ describe Message do
           )
           expect(@message).to receive(:deliver_via_sms).never
           @message.deliver
+        end
+
+        it "delivers all sms when the sms_allowed override is set" do
+          @user.account.settings[:sms_allowed] = true
+          message_model(
+            dispatch_at: Time.now,
+            workflow_state: 'staged',
+            to: '+18015550100',
+            updated_at: Time.now.utc - 11.minutes,
+            path_type: 'sms',
+            notification_name: 'Conversation Message',
+            user: @user
+          )
+          expect(@message).to receive(:deliver_via_sms)
+          @message.deliver
+          @user.account.settings[:sms_allowed] = nil
         end
 
       end

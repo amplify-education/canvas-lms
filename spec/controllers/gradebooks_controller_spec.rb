@@ -702,6 +702,87 @@ describe GradebooksController do
       end
     end
 
+    describe "prefetching" do
+      render_views
+
+      before :each do
+        user_session(@teacher)
+      end
+
+      it "prefetches user ids" do
+        get :show, params: { course_id: @course.id }
+
+        scripts = Nokogiri::HTML(response.body).css('script').map(&:text)
+        expect(scripts).to include a_string_matching(/\bprefetched_xhrs\b.*\buser_ids\b/)
+      end
+
+      it "prefetches user ids when only 'prefetch_gradebook_user_ids' is enabled" do
+        # TODO: remove this with TALLY-831
+        Account.site_admin.enable_feature!(:prefetch_gradebook_user_ids)
+        allow(Account.site_admin).to receive(:feature_enabled?).and_call_original
+        allow(Account.site_admin).to receive(:feature_enabled?).with(:gradebook_dataloader_improvements).and_return(false)
+        get :show, params: { course_id: @course.id }
+
+        scripts = Nokogiri::HTML(response.body).css('script').map(&:text)
+        expect(scripts).to include a_string_matching(/\bprefetched_xhrs\b.*\buser_ids\b/)
+      end
+
+      it "prefetches grading period assignments when the course uses grading periods" do
+        group_helper = Factories::GradingPeriodGroupHelper.new
+        period_helper = Factories::GradingPeriodHelper.new
+
+        grading_period_group = group_helper.create_for_account(@course.root_account)
+        term = @course.enrollment_term
+        term.grading_period_group = grading_period_group
+        term.save!
+        period_helper.create_presets_for_group(grading_period_group, :past, :current, :future)
+
+        get :show, params: { course_id: @course.id }
+
+        scripts = Nokogiri::HTML(response.body).css('script').map(&:text)
+        expect(scripts).to include a_string_matching(/\bprefetched_xhrs\b.*\bgrading_period_assignments\b/)
+      end
+
+      it "does not prefetch grading period assignments when the course has no grading periods" do
+        get :show, params: { course_id: @course.id }
+
+        scripts = Nokogiri::HTML(response.body).css('script').map(&:text)
+        expect(scripts).not_to include a_string_matching(/\bprefetched_xhrs\b.*\bgrading_period_assignments\b/)
+      end
+
+      context "when 'gradebook_dataloader_improvements' is disabled" do
+        # TODO: remove this entire block with TALLY-831
+
+        before :each do
+          allow(Account.site_admin).to receive(:feature_enabled?).and_call_original
+          allow(Account.site_admin).to receive(:feature_enabled?).with(:gradebook_dataloader_improvements).and_return(false)
+        end
+
+        it "does not prefetch user ids" do
+          get :show, params: { course_id: @course.id }
+
+          scripts = Nokogiri::HTML(response.body).css('script').map(&:text)
+          expect(scripts).not_to include a_string_matching(/\bprefetched_xhrs\b.*\buser_ids\b/)
+        end
+
+        it "does not prefetch grading period assignments" do
+          group_helper = Factories::GradingPeriodGroupHelper.new
+          period_helper = Factories::GradingPeriodHelper.new
+
+          grading_period_group = group_helper.create_for_account(@course.root_account)
+          term = @course.enrollment_term
+          term.grading_period_group = grading_period_group
+          term.save!
+          period_helper.create_presets_for_group(grading_period_group, :past, :current, :future)
+
+          get :show, params: { course_id: @course.id }
+
+          scripts = Nokogiri::HTML(response.body).css('script').map(&:text)
+          expect(scripts).not_to include a_string_matching(/\bprefetched_xhrs\b.*\bgrading_period_assignments\b/)
+        end
+      end
+    end
+
     describe 'js_env' do
       before :each do
         user_session(@teacher)
@@ -752,6 +833,22 @@ describe GradebooksController do
             get :show, params: { course_id: @course.id }
             expect(allow_final_grade_override).to eq false
           end
+        end
+      end
+
+      describe "dataloader_improvements" do
+        # TODO: remove this entire block with TALLY-831
+
+        it "is true when 'gradebook_dataloader_improvements' is enabled" do
+          get :show, params: { course_id: @course.id }
+          expect(gradebook_options.fetch(:dataloader_improvements)).to be true
+        end
+
+        it "is false when 'gradebook_dataloader_improvements' is disabled" do
+          allow(Account.site_admin).to receive(:feature_enabled?).and_call_original
+          allow(Account.site_admin).to receive(:feature_enabled?).with(:gradebook_dataloader_improvements).and_return(false)
+          get :show, params: { course_id: @course.id }
+          expect(gradebook_options.fetch(:dataloader_improvements)).to be false
         end
       end
 
@@ -820,11 +917,112 @@ describe GradebooksController do
         expect(gradebook_options[:show_similarity_score]).to be(false)
       end
 
-      it 'includes api_max_per_page' do
-        Setting.set('api_max_per_page', 50)
+      it "includes api_max_per_page" do
+        Setting.set("api_max_per_page", 50)
         get :show, params: {course_id: @course.id}
         api_max_per_page = assigns[:js_env][:GRADEBOOK_OPTIONS][:api_max_per_page]
         expect(api_max_per_page).to eq(50)
+      end
+
+      describe "performance_controls" do
+        let(:performance_controls) { assigns[:js_env][:GRADEBOOK_OPTIONS][:performance_controls] }
+
+        before(:once) do
+          Setting.set("api_max_per_page", 100)
+        end
+
+        it "includes active_request_limit" do
+          Setting.set("gradebook.active_request_limit", 20)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:active_request_limit]).to eq(20)
+        end
+
+        it "defaults active_request_limit to 12" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:active_request_limit]).to eq(12)
+        end
+
+        it "includes api_max_per_page" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:api_max_per_page]).to eq(100)
+        end
+
+        it "includes assignment_groups_per_page" do
+          Setting.set("gradebook.assignment_groups_per_page", 200)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:assignment_groups_per_page]).to eq(200)
+        end
+
+        it "defaults assignment_groups_per_page to the api_max_per_page setting" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:assignment_groups_per_page]).to eq(100)
+        end
+
+        it "includes context_modules_per_page" do
+          Setting.set("gradebook.context_modules_per_page", 200)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:context_modules_per_page]).to eq(200)
+        end
+
+        it "defaults context_modules_per_page to the api_max_per_page setting" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:context_modules_per_page]).to eq(100)
+        end
+
+        it "includes custom_column_data_per_page" do
+          Setting.set("gradebook.custom_column_data_per_page", 200)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:custom_column_data_per_page]).to eq(200)
+        end
+
+        it "defaults custom_column_data_per_page to the api_max_per_page setting" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:custom_column_data_per_page]).to eq(100)
+        end
+
+        it "includes custom_columns_per_page" do
+          Setting.set("gradebook.custom_columns_per_page", 200)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:custom_columns_per_page]).to eq(200)
+        end
+
+        it "defaults custom_columns_per_page to the api_max_per_page setting" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:custom_columns_per_page]).to eq(100)
+        end
+
+        it "includes students_chunk_size" do
+          Setting.set("gradebook.students_chunk_size", 200)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:students_chunk_size]).to eq(200)
+        end
+
+        it "defaults students_chunk_size to the api_max_per_page setting" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:students_chunk_size]).to eq(100)
+        end
+
+        it "includes submissions_chunk_size" do
+          Setting.set("gradebook.submissions_chunk_size", 20)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:submissions_chunk_size]).to eq(20)
+        end
+
+        it "defaults submissions_chunk_size to 10" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:submissions_chunk_size]).to eq(10)
+        end
+
+        it "includes submissions_per_page" do
+          Setting.set("gradebook.submissions_per_page", 200)
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:submissions_per_page]).to eq(200)
+        end
+
+        it "defaults submissions_per_page to the api_max_per_page setting" do
+          get :show, params: {course_id: @course.id}
+          expect(performance_controls[:submissions_per_page]).to eq(100)
+        end
       end
 
       describe "new_post_policy_icons_enabled" do
@@ -1061,16 +1259,9 @@ describe GradebooksController do
     end
 
     context 'includes data needed by the Gradebook Action menu in ENV' do
-      let(:create_proficiency) { false }
-      let(:enable_non_scoring_rubrics) { false }
-
       before do
         user_session(@teacher)
-        @proficiency = outcome_proficiency_model(@course.account) if create_proficiency
-        @course.root_account.enable_feature! :non_scoring_rubrics if enable_non_scoring_rubrics
-
         get 'show', params: {course_id: @course.id}
-
         @gradebook_env = assigns[:js_env][:GRADEBOOK_OPTIONS]
       end
 
@@ -1090,41 +1281,6 @@ describe GradebooksController do
 
       it "includes the context_modules_url in the ENV" do
         expect(@gradebook_env[:context_modules_url]).to eq(api_v1_course_context_modules_url(@course))
-      end
-
-      shared_examples_for 'returns no outcome proficiency' do
-        it 'returns nil for outcome proficiency' do
-          expect(@gradebook_env[:outcome_proficiency]).to be_nil
-        end
-      end
-
-      context 'non-scoring rubrics feature flag disabled' do
-        context 'no outcome proficiency on account' do
-          include_examples 'returns no outcome proficiency'
-        end
-
-        skip 'outcome proficiency on account' do
-          skip('NSRs are not being disabled properly even with the disable_feature! method')
-          let(:create_proficiency) { true }
-
-          include_examples 'returns no outcome proficiency'
-        end
-      end
-
-      context 'non-scoring rubrics feature flag enabled' do
-        let(:enable_non_scoring_rubrics) { true }
-
-        context 'no outcome proficiency on account' do
-          include_examples 'returns no outcome proficiency'
-        end
-
-        context 'outcome proficiency on account' do
-          let(:create_proficiency) { true }
-
-          it 'returns an outcome proficiency' do
-            expect(@gradebook_env[:outcome_proficiency]).to eq(@proficiency.as_json)
-          end
-        end
       end
     end
 
@@ -1219,10 +1375,28 @@ describe GradebooksController do
         })
       end
 
+      def update_preferred_gradebook_version!(version)
+        @teacher.preferences[:gradebook_version] = version
+        @teacher.save!
+        user_session(@teacher)
+      end
+
       context "when the user has no preferred view" do
         it "renders 'gradebook' when no view is requested" do
           get "show", params: {course_id: @course.id}
           expect(response).to render_template("gradebooks/gradebook")
+        end
+
+        it "renders 'gradebook' when the user uses default view" do
+          update_preferred_gradebook_version!("2")
+          get "show", params: {course_id: @course.id}
+          expect(response).to render_template("gradebooks/gradebook")
+        end
+
+        it "renders 'individual' when the user uses individual view" do
+          update_preferred_gradebook_version!("individual")
+          get "show", params: {course_id: @course.id}
+          expect(response).to render_template("gradebooks/individual")
         end
 
         it "updates the user's preference when the requested view is 'gradebook'" do
@@ -1258,6 +1432,18 @@ describe GradebooksController do
           expect(response).to render_template("gradebooks/gradebook")
         end
 
+        it "renders 'gradebook' when the user uses default view" do
+          update_preferred_gradebook_version!("2")
+          get "show", params: {course_id: @course.id}
+          expect(response).to render_template("gradebooks/gradebook")
+        end
+
+        it "renders 'individual' when the user uses individual view" do
+          update_preferred_gradebook_version!("individual")
+          get "show", params: {course_id: @course.id}
+          expect(response).to render_template("gradebooks/individual")
+        end
+
         it "redirects to the gradebook when requesting the preferred view" do
           get "show", params: {course_id: @course.id, view: "gradebook"}
           expect(response).to redirect_to(action: "show")
@@ -1283,6 +1469,18 @@ describe GradebooksController do
         it "renders 'learning_mastery' when no view is requested" do
           get "show", params: {course_id: @course.id}
           expect(response).to render_template("gradebooks/learning_mastery")
+        end
+
+        it "renders 'learning_mastery' when the user uses default view" do
+          update_preferred_gradebook_version!("2")
+          get "show", params: {course_id: @course.id}
+          expect(response).to render_template("gradebooks/learning_mastery")
+        end
+
+        it "renders 'individual' when the user uses individual view" do
+          update_preferred_gradebook_version!("individual")
+          get "show", params: {course_id: @course.id}
+          expect(response).to render_template("gradebooks/individual")
         end
 
         it "redirects to the gradebook when requesting the preferred view" do
@@ -2518,19 +2716,6 @@ describe GradebooksController do
       expect(@controller).to receive(:external_tools).and_return([]).once
 
       expect(@controller.post_grades_ltis).to eq(@controller.post_grades_ltis)
-    end
-  end
-
-  describe '#post_grades_tools' do
-    it 'returns a tools with a type of post_grades if the post_grades feature option is enabled' do
-      @course.enable_feature!(:post_grades)
-      @controller.instance_variable_set(:@context, @course)
-      expect(@controller.post_grades_tools).to eq([{:type=>:post_grades}])
-    end
-
-    it 'does not return a tools with a type of post_grades if the post_grades feature option is enabled' do
-      @controller.instance_variable_set(:@context, @course)
-      expect(@controller.post_grades_tools).to eq([])
     end
   end
 

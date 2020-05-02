@@ -451,9 +451,11 @@ class UsersController < ApplicationController
     includes = (params[:include] || []) & %w{avatar_url email last_login time_zone uuid}
     includes << 'last_login' if params[:sort] == 'last_login' && !includes.include?('last_login')
     users = users.with_last_login if includes.include?('last_login') && !search_term
-    users = Api.paginate(users, self, api_v1_account_users_url, page_opts)
-    user_json_preloads(users, includes.include?('email'))
-    render :json => users.map { |u| user_json(u, @current_user, session, includes)}
+    Shackles.activate(:slave) do
+      users = Api.paginate(users, self, api_v1_account_users_url, page_opts)
+      user_json_preloads(users, includes.include?('email'))
+      render :json => users.map { |u| user_json(u, @current_user, session, includes)}
+    end
   end
 
 
@@ -562,7 +564,13 @@ class UsersController < ApplicationController
 
   def dashboard_cards
     dashboard_courses = map_courses_for_menu(@current_user.menu_courses, tabs: DASHBOARD_CARD_TABS)
-    Rails.cache.write(['last_known_dashboard_cards_count', @current_user.global_id].cache_key, dashboard_courses.count)
+    if @domain_root_account.feature_enabled?(:unpublished_courses)
+      published, unpublished = dashboard_courses.partition { |course| course[:published]}
+      Rails.cache.write(['last_known_dashboard_cards_published_count', @current_user.global_id].cache_key, published.count)
+      Rails.cache.write(['last_known_dashboard_cards_unpublished_count', @current_user.global_id].cache_key, unpublished.count)
+    else
+      Rails.cache.write(['last_known_dashboard_cards_count', @current_user.global_id].cache_key, dashboard_courses.count)
+    end
     render json: dashboard_courses
   end
 
@@ -858,53 +866,53 @@ class UsersController < ApplicationController
   #     },
   #   ]
   def todo_items
-    return render_unauthorized_action unless @current_user
+    Shackles.activate(:slave) do
+      return render_unauthorized_action unless @current_user
+      bookmark = Plannable::Bookmarker.new(Assignment, false, [:due_at, :created_at], :id)
+      grading_scope = @current_user.assignments_needing_grading(scope_only: true).
+        reorder(:due_at, :id).preload(:external_tool_tag, :rubric_association, :rubric, :discussion_topic, :quiz, :duplicate_of)
+      submitting_scope = @current_user.
+        assignments_needing_submitting(
+          include_ungraded: true,
+          scope_only: true).
+        reorder(:due_at, :id).preload(:external_tool_tag, :rubric_association, :rubric, :discussion_topic, :quiz).eager_load(:duplicate_of)
 
-    bookmark = Plannable::Bookmarker.new(Assignment, false, [:due_at, :created_at], :id)
-    grading_scope = @current_user.assignments_needing_grading(scope_only: true).
-      reorder(:due_at, :id).preload(:external_tool_tag, :rubric_association, :rubric, :discussion_topic, :quiz, :duplicate_of)
-    submitting_scope = @current_user.
-      assignments_needing_submitting(
-        include_ungraded: true,
-        scope_only: true).
-      reorder(:due_at, :id).preload(:external_tool_tag, :rubric_association, :rubric, :discussion_topic, :quiz).eager_load(:duplicate_of)
-
-    grading_collection = BookmarkedCollection.wrap(bookmark, grading_scope)
-    grading_collection = BookmarkedCollection.filter(grading_collection) do |assignment|
-      assignment.context.grants_right?(@current_user, session, :manage_grades)
-    end
-    grading_collection = BookmarkedCollection.transform(grading_collection) do |a|
-      todo_item_json(a, @current_user, session, 'grading')
-    end
-    submitting_collection = BookmarkedCollection.wrap(bookmark, submitting_scope)
-    submitting_collection = BookmarkedCollection.transform(submitting_collection) do |a|
-      todo_item_json(a, @current_user, session, 'submitting')
-    end
-    collections = [
-      ['grading', grading_collection],
-      ['submitting', submitting_collection]
-    ]
-
-    if Array(params[:include]).include? 'ungraded_quizzes'
-      quizzes_bookmark = Plannable::Bookmarker.new(Quizzes::Quiz, false, [:due_at, :created_at], :id)
-      quizzes_scope = @current_user.
-        ungraded_quizzes(
-          :needing_submitting => true,
-          :scope_only => true
-        ).
-        reorder(:due_at, :id)
-      quizzes_collection = BookmarkedCollection.wrap(quizzes_bookmark, quizzes_scope)
-      quizzes_collection = BookmarkedCollection.transform(quizzes_collection) do |a|
+      grading_collection = BookmarkedCollection.wrap(bookmark, grading_scope)
+      grading_collection = BookmarkedCollection.filter(grading_collection) do |assignment|
+        assignment.context.grants_right?(@current_user, session, :manage_grades)
+      end
+      grading_collection = BookmarkedCollection.transform(grading_collection) do |a|
+        todo_item_json(a, @current_user, session, 'grading')
+      end
+      submitting_collection = BookmarkedCollection.wrap(bookmark, submitting_scope)
+      submitting_collection = BookmarkedCollection.transform(submitting_collection) do |a|
         todo_item_json(a, @current_user, session, 'submitting')
       end
+      collections = [
+        ['grading', grading_collection],
+        ['submitting', submitting_collection]
+      ]
 
-      collections << ['quizzes', quizzes_collection]
+      if Array(params[:include]).include? 'ungraded_quizzes'
+        quizzes_bookmark = Plannable::Bookmarker.new(Quizzes::Quiz, false, [:due_at, :created_at], :id)
+        quizzes_scope = @current_user.
+          ungraded_quizzes(
+            :needing_submitting => true,
+            :scope_only => true
+          ).
+          reorder(:due_at, :id)
+        quizzes_collection = BookmarkedCollection.wrap(quizzes_bookmark, quizzes_scope)
+        quizzes_collection = BookmarkedCollection.transform(quizzes_collection) do |a|
+          todo_item_json(a, @current_user, session, 'submitting')
+        end
+
+        collections << ['quizzes', quizzes_collection]
+      end
+
+      paginated_collection = BookmarkedCollection.merge(*collections)
+      todos = Api.paginate(paginated_collection, self, api_v1_user_todo_list_items_url)  
+      render :json => todos
     end
-
-    paginated_collection = BookmarkedCollection.merge(*collections)
-    todos = Api.paginate(paginated_collection, self, api_v1_user_todo_list_items_url)
-
-    render :json => todos
   end
 
   # @API List counts for todo items
@@ -924,13 +932,15 @@ class UsersController < ApplicationController
   #     assignments_needing_submitting: 10
   #   }
   def todo_item_count
-    return render_unauthorized_action unless @current_user
-    grading = @current_user.submissions_needing_grading_count
-    submitting = @current_user.assignments_needing_submitting(include_ungraded: true, scope_only: true, limit: nil).size
-    if Array(params[:include]).include? 'ungraded_quizzes'
-      submitting += @current_user.ungraded_quizzes(:needing_submitting => true, scope_only: true, limit: nil).size
+    Shackles.activate(:slave) do
+      return render_unauthorized_action unless @current_user
+      grading = @current_user.submissions_needing_grading_count
+      submitting = @current_user.assignments_needing_submitting(include_ungraded: true, scope_only: true, limit: nil).size
+      if Array(params[:include]).include? 'ungraded_quizzes'
+        submitting += @current_user.ungraded_quizzes(:needing_submitting => true, scope_only: true, limit: nil).size
+      end
+      render json: {needs_grading_count: grading, assignments_needing_submitting: submitting}
     end
-    render json: {needs_grading_count: grading, assignments_needing_submitting: submitting}
   end
 
   include Api::V1::Assignment
@@ -1460,6 +1470,14 @@ class UsersController < ApplicationController
   #   created user automatically logged in. The URL is only valid for a short time, and must
   #   match the domain this request is directed to, and be for a well-formed path that Canvas
   #   can recognize.
+  #
+  # @argument initial_enrollment_type [String]
+  #   `observer` if doing a self-registration with a pairing code. This allows setting the
+  #   password during user creation.
+  #
+  # @argument pairing_code[code] [String]
+  #   If provided and valid, will link the new user as an observer to the student's whose
+  #   pairing code is given.
   #
   # @returns User
   def create

@@ -286,13 +286,15 @@ require 'csv'
 #     }
 
 class AccountsController < ApplicationController
-  before_action :require_user, :only => [:index, :terms_of_service, :help_links]
+  before_action :require_user, :only => [:index, :help_links]
   before_action :reject_student_view_student
   before_action :get_context
   before_action :rce_js_env, only: [:settings]
 
   include Api::V1::Account
   include CustomSidebarLinksHelper
+  include SupportHelpers::ControllerHelpers
+  before_action :require_site_admin, only: [:restore_user]
 
   INTEGER_REGEX = /\A[+-]?\d+\z/
   SIS_ASSINGMENT_NAME_LENGTH_DEFAULT = 255
@@ -1156,6 +1158,41 @@ class AccountsController < ApplicationController
     else
       render_unauthorized_action
     end
+  end
+
+  # @API Restore a deleted user from a root account
+  # @internal
+  #
+  # Restore a user record along with the most recently deleted pseudonym
+  # from a Canvas root account. Can only be done by a siteadmin.
+  #
+  # @example_request
+  #     curl https://<canvas>/api/v1/accounts/3/users/5/restore \
+  #       -H 'Authorization: Bearer <ACCESS_TOKEN>' \
+  #       -X PUT
+  #
+  # @returns User
+  def restore_user
+    raise ActiveRecord::RecordNotFound unless @account.root_account?
+    user = api_find(User, params[:user_id])
+    p = user && @account.pseudonyms.where(user_id: user).order(deleted_at: :desc).first
+    raise ActiveRecord::RecordNotFound unless p
+    unless user.allows_user_to_remove_from_account?(@account, @current_user)
+      return render_unauthorized_action
+    end
+    if @account.pseudonyms.where(user_id: user).active.any? && !user.deleted?
+      return render json: {errors: 'User not deleted'}, status: :bad_request
+    end
+    if user.deleted?
+      user.workflow_state = 'registered'
+      user.save!
+    end
+    p.workflow_state = 'active'
+    p.save!
+    user.update_account_associations
+    user.clear_cache_key(*Canvas::CacheRegister::ALLOWED_TYPES['User'])
+    user.touch
+    render json: user || {}
   end
 
   def eportfolio_moderation

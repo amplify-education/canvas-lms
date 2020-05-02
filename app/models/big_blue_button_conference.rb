@@ -29,7 +29,7 @@ class BigBlueButtonConference < WebConference
     description: ->{ t('recording_setting_enabled_description', 'Enable recording for this conference') },
     type: :boolean,
     default: false,
-    visible: ->{ WebConference.config(BigBlueButtonConference.to_s)[:recording_enabled] },
+    visible: ->{ WebConference.config(class_name: BigBlueButtonConference.to_s)[:recording_enabled] },
   }
 
   def initiate_conference
@@ -107,7 +107,10 @@ class BigBlueButtonConference < WebConference
   end
 
   def recording_formats(recording)
-    recording_formats = recording.fetch(:playback, [])
+    recording_formats = recording.fetch(:playback, []).map do |format|
+      show_to_students = !!format[:length] || format[:type] == "notes" # either is an actual recording or shared notes
+      format.merge(:show_to_students => show_to_students)
+    end
     {
       recording_id:     recording[:recordID],
       title:            recording[:name],
@@ -166,7 +169,8 @@ class BigBlueButtonConference < WebConference
 
   def use_fallback_config?
     # use the fallback config (if possible) if it wasn't created with the current config
-    self.settings[:domain] != self.class.config[:domain]
+    self.class.config[:use_fallback] &&
+      self.settings[:domain] != self.class.config[:domain]
   end
 
   private

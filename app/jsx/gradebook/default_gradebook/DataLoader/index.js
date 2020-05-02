@@ -16,232 +16,136 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import $ from 'jquery'
+import {difference} from 'lodash'
 
-import OldDataLoader from '../../DataLoader'
+import {RequestDispatch} from '../../../shared/network'
+import AssignmentGroupsLoader from './AssignmentGroupsLoader'
+import ContextModulesLoader from './ContextModulesLoader'
+import CustomColumnsDataLoader from './CustomColumnsDataLoader'
+import CustomColumnsLoader from './CustomColumnsLoader'
+import GradingPeriodAssignmentsLoader from './GradingPeriodAssignmentsLoader'
+import SisOverridesLoader from './SisOverridesLoader'
+import StudentContentDataLoader from './StudentContentDataLoader'
+import StudentIdsLoader from './StudentIdsLoader'
 
 export default class DataLoader {
-  constructor(gradebook) {
+  constructor({gradebook, performanceControls}) {
     this._gradebook = gradebook
+
+    const dispatch = new RequestDispatch({
+      activeRequestLimit: performanceControls.activeRequestLimit
+    })
+
+    const loaderConfig = {
+      dispatch,
+      gradebook,
+      performanceControls
+    }
+
+    this.assignmentGroupsLoader = new AssignmentGroupsLoader(loaderConfig)
+    this.contextModulesLoader = new ContextModulesLoader(loaderConfig)
+    this.customColumnsDataLoader = new CustomColumnsDataLoader(loaderConfig)
+    this.customColumnsLoader = new CustomColumnsLoader(loaderConfig)
+    this.gradingPeriodAssignmentsLoader = new GradingPeriodAssignmentsLoader(loaderConfig)
+    this.sisOverridesLoader = new SisOverridesLoader(loaderConfig)
+    this.studentContentDataLoader = new StudentContentDataLoader(loaderConfig)
+    this.studentIdsLoader = new StudentIdsLoader(loaderConfig)
   }
 
   loadInitialData() {
     const gradebook = this._gradebook
-    const {options} = gradebook
 
-    gradebook.setAssignmentGroupsLoaded(false)
-    gradebook.setStudentsLoaded(false)
-    gradebook.setSubmissionsLoaded(false)
-
-    const promises = OldDataLoader.loadGradebookData({
+    this.__loadGradebookData({
+      dataLoader: this,
       gradebook,
 
-      courseId: options.context_id,
-      perPage: options.api_max_per_page,
-
-      getGradingPeriodAssignments: gradebook.gradingPeriodSet != null,
-      loadedStudentIds: [],
-
-      assignmentGroupsURL: options.assignment_groups_url,
-      assignmentGroupsParams: {
-        exclude_response_fields: ['description', 'in_closed_grading_period', 'needs_grading_count'],
-        include: ['assignment_group_id', 'grades_published', 'module_ids', 'post_manually']
-      },
-
-      contextModulesURL: options.context_modules_url,
-      customColumnsURL: options.custom_columns_url,
-      sectionsURL: options.sections_url,
-
-      studentsURL: options.students_stateless_url,
-      studentsPageCb: gradebook.gotChunkOfStudents,
-      studentsParams: gradebook.studentsParams(),
-
-      submissionsURL: options.submissions_url,
-      submissionsChunkCb: gradebook.gotSubmissionsChunk,
-      submissionsChunkSize: options.chunk_size,
-
-      customColumnDataURL: options.custom_column_data_url,
-      customColumnDataPageCb: gradebook.gotCustomColumnDataChunk,
-      customColumnDataParams: {include_hidden: true}
-    })
-
-    promises.gotStudentIds.then(response => {
-      gradebook.courseContent.students.setStudentIds(response.user_ids)
-      gradebook.buildRows()
-    })
-
-    if (promises.gotGradingPeriodAssignments != null) {
-      promises.gotGradingPeriodAssignments.then(gradebook.gotGradingPeriodAssignments)
-    }
-
-    promises.gotAssignmentGroups.then(gradebook.gotAllAssignmentGroups)
-    promises.gotCustomColumns.then(gradebook.gotCustomColumns)
-    promises.gotStudents.then(gradebook.gotAllStudents)
-
-    promises.gotStudents.then(() => {
-      gradebook.setStudentsLoaded(true)
-      gradebook.updateColumnHeaders()
-      gradebook.renderFilters()
-    })
-
-    promises.gotAssignmentGroups.then(() => {
-      gradebook.contentLoadStates.assignmentsLoaded = true
-      gradebook.renderViewOptionsMenu()
-      gradebook.updateColumnHeaders()
-    })
-
-    promises.gotContextModules.then(contextModules => {
-      gradebook.setContextModules(contextModules)
-      gradebook.contentLoadStates.contextModulesLoaded = true
-      gradebook.renderViewOptionsMenu()
-      gradebook.renderFilters()
-    })
-
-    promises.gotSubmissions.then(() => {
-      gradebook.setSubmissionsLoaded(true)
-      gradebook.updateColumnHeaders()
-      gradebook.renderFilters()
-    })
-
-    /*
-     * With post policies, the "total grade" column needs to be re-rendered
-     * after loading students and submissions so we can indicate there are
-     * hidden submissions
-     */
-    $.when(promises.gotStudents, promises.gotSubmissions).then(() => {
-      gradebook.updateTotalGradeColumn()
-    })
-
-    gradebook.renderedGrid = $.when(
-      promises.gotStudentIds,
-      promises.gotContextModules,
-      promises.gotCustomColumns,
-      promises.gotAssignmentGroups,
-      promises.gotGradingPeriodAssignments
-    ).then(() => {
-      gradebook.finishRenderingUI()
+      getAssignmentGroups: true,
+      getContextModules: true,
+      getCustomColumns: true,
+      getGradingPeriodAssignments: gradebook.gradingPeriodSet != null
     })
   }
 
   loadCustomColumnData(customColumnId) {
-    const gradebook = this._gradebook
-    const {options} = gradebook
-
-    OldDataLoader.getDataForColumn(
-      customColumnId,
-      options.custom_column_data_url,
-      {},
-      gradebook.gotCustomColumnDataChunk
-    )
+    this.customColumnsDataLoader.loadCustomColumnsData([customColumnId])
   }
 
   loadOverridesForSIS() {
-    const gradebook = this._gradebook
-    const {options} = gradebook
-
-    const assignmentGroupsURL = options.assignment_groups_url.replace(
-      '&include%5B%5D=assignment_visibility',
-      ''
-    )
-
-    const promises = OldDataLoader.loadGradebookData({
-      assignmentGroupsURL,
-
-      assignmentGroupsParams: {
-        exclude_response_fields: ['description', 'needs_grading_count', 'in_closed_grading_period'],
-        include: ['overrides']
-      },
-
-      onlyLoadAssignmentGroups: true
-    })
-
-    $.when(promises.gotAssignmentGroups).then(gradebook.addOverridesToPostGradesStore)
+    this.sisOverridesLoader.loadOverrides()
   }
 
   reloadStudentDataForEnrollmentFilterChange() {
-    this._reloadStudentData({
+    this.__reloadStudentData({
       getGradingPeriodAssignments: true
     })
   }
 
   reloadStudentDataForSectionFilterChange() {
-    this._reloadStudentData({
+    this.__reloadStudentData({
       getGradingPeriodAssignments: false
     })
   }
 
   reloadStudentDataForStudentGroupFilterChange() {
-    this._reloadStudentData({
+    this.__reloadStudentData({
       getGradingPeriodAssignments: false
     })
   }
 
   // PRIVATE
 
-  _reloadStudentData(loadOptions) {
+  __reloadStudentData(loadOptions) {
     const gradebook = this._gradebook
-    const {options} = gradebook
 
-    gradebook.setStudentsLoaded(false)
-    gradebook.setSubmissionsLoaded(false)
-    gradebook.renderFilters()
+    gradebook.updateStudentsLoaded(false)
+    gradebook.updateSubmissionsLoaded(false)
 
-    const promises = OldDataLoader.loadGradebookData({
+    this.__loadGradebookData({
+      dataLoader: this,
       gradebook,
 
-      courseId: options.context_id,
-      perPage: options.api_max_per_page,
-
       getGradingPeriodAssignments:
-        loadOptions.getGradingPeriodAssignments && gradebook.gradingPeriodSet != null,
-
-      loadedStudentIds: gradebook.courseContent.students.listStudentIds(),
-      studentsURL: options.students_stateless_url,
-      studentsPageCb: gradebook.gotChunkOfStudents,
-      studentsParams: gradebook.studentsParams(),
-
-      submissionsURL: options.submissions_url,
-      submissionsChunkCb: gradebook.gotSubmissionsChunk,
-      submissionsChunkSize: options.chunk_size,
-
-      customColumnIds: gradebook.gradebookContent.customColumns.map(column => column.id),
-      customColumnDataURL: options.custom_column_data_url,
-      customColumnDataPageCb: gradebook.gotCustomColumnDataChunk,
-      customColumnDataParams: {include_hidden: true}
+        loadOptions.getGradingPeriodAssignments && gradebook.gradingPeriodSet != null
     })
+  }
 
-    if (promises.gotGradingPeriodAssignments != null) {
-      promises.gotGradingPeriodAssignments.then(response => {
-        gradebook.gotGradingPeriodAssignments(response)
-        gradebook.updateColumns()
-      })
+  async __loadGradebookData(options) {
+    const {dataLoader, gradebook} = options
+
+    // Store currently-loaded student ids for diffing below.
+    const loadedStudentIds = gradebook.courseContent.students.listStudentIds()
+
+    // Begin loading Student IDs before any other data.
+    const gotStudentIds = dataLoader.studentIdsLoader.loadStudentIds()
+
+    if (options.getAssignmentGroups) {
+      dataLoader.assignmentGroupsLoader.loadAssignmentGroups()
     }
 
-    promises.gotStudentIds.then(response => {
-      gradebook.courseContent.students.setStudentIds(response.user_ids)
-      gradebook.assignmentStudentVisibility = {}
-      gradebook.buildRows()
-    })
+    if (options.getGradingPeriodAssignments) {
+      dataLoader.gradingPeriodAssignmentsLoader.loadGradingPeriodAssignments()
+    }
 
-    promises.gotStudents.then(() => {
-      gradebook.setStudentsLoaded(true)
-      gradebook.updateColumnHeaders()
-      gradebook.renderFilters()
-    })
+    if (options.getCustomColumns) {
+      dataLoader.customColumnsLoader.loadCustomColumns()
+    }
 
-    promises.gotSubmissions.then(() => {
-      gradebook.setSubmissionsLoaded(true)
-      gradebook.updateColumnHeaders()
-      gradebook.renderFilters()
-    })
+    if (options.getContextModules) {
+      dataLoader.contextModulesLoader.loadContextModules()
+    }
+
+    await gotStudentIds
+
+    const studentIds = gradebook.courseContent.students.listStudentIds()
+    const studentIdsToLoad = difference(studentIds, loadedStudentIds)
+
+    await dataLoader.studentContentDataLoader.load(studentIdsToLoad)
 
     /*
-     * With post policies, the "total grade" column needs to be re-rendered
-     * after loading students and submissions so we can indicate there are
-     * hidden submissions
+     * Currently, custom columns data has the lowest priority for initial
+     * data loading, so it waits until all students and submissions are
+     * finished loading.
      */
-    $.when(promises.gotStudents, promises.gotSubmissions).then(() => {
-      gradebook.updateTotalGradeColumn()
-    })
+    dataLoader.customColumnsDataLoader.loadCustomColumnsData()
   }
 }

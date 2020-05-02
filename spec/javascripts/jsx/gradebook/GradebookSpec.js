@@ -32,13 +32,11 @@ import * as FlashAlert from 'jsx/shared/FlashAlert'
 import AsyncComponents from 'jsx/gradebook/default_gradebook/AsyncComponents'
 import ActionMenu from 'jsx/gradebook/default_gradebook/components/ActionMenu'
 import CourseGradeCalculator from 'jsx/gradebook/CourseGradeCalculator'
-import DataLoader from 'jsx/gradebook/DataLoader'
 import AnonymousSpeedGraderAlert from 'jsx/gradebook/default_gradebook/components/AnonymousSpeedGraderAlert'
 import GradebookApi from 'jsx/gradebook/default_gradebook/apis/GradebookApi'
 import LatePolicyApplicator from 'jsx/grading/LatePolicyApplicator'
 import SubmissionCommentApi from 'jsx/gradebook/default_gradebook/apis/SubmissionCommentApi'
 import SubmissionStateMap from 'jsx/gradebook/SubmissionStateMap'
-import PostPolicies from 'jsx/gradebook/default_gradebook/PostPolicies'
 import studentRowHeaderConstants from 'jsx/gradebook/default_gradebook/constants/studentRowHeaderConstants'
 import {darken, statusColors, defaultColors} from 'jsx/gradebook/default_gradebook/constants/colors'
 import ViewOptionsMenu from 'jsx/gradebook/default_gradebook/components/ViewOptionsMenu'
@@ -47,8 +45,7 @@ import {waitFor} from '../support/Waiters'
 
 import {
   createGradebook,
-  setFixtureHtml,
-  stubDataLoader
+  setFixtureHtml
 } from 'jsx/gradebook/default_gradebook/__tests__/GradebookSpecHelper'
 import {createCourseGradesWithGradingPeriods as createGrades} from './GradeCalculatorSpecHelper'
 
@@ -270,7 +267,6 @@ test('updates partial .filterColumnsBy settings with the default values', () => 
 QUnit.module('Gradebook#initialize', () => {
   QUnit.module('with dataloader stubs', moduleHooks => {
     moduleHooks.beforeEach(() => {
-      stubDataLoader()
       setFixtureHtml($fixtures)
     })
 
@@ -294,6 +290,23 @@ QUnit.module('Gradebook#initialize', () => {
     test('stores the late policy as undefined if the late_policy option is null', () => {
       const gradebook = createInitializedGradebook({late_policy: null})
       strictEqual(gradebook.courseContent.latePolicy, undefined)
+    })
+  })
+})
+
+QUnit.module('Gradebook', () => {
+  QUnit.module('#dataLoader', () => {
+    // TODO: remove this entire module with TALLY-831
+
+    test('is the new DataLoader when `dataloader_improvements` is true', () => {
+      // `dataloader_improvements` should default to enabled except in beta and production
+      const gradebook = createGradebook()
+      strictEqual(gradebook.dataLoader.constructor.name, 'DataLoader')
+    })
+
+    test('is the old DataLoader when `dataloader_improvements` is false', () => {
+      const gradebook = createGradebook({dataloader_improvements: false})
+      strictEqual(gradebook.dataLoader.constructor.name, 'OldDataLoader')
     })
   })
 })
@@ -2030,7 +2043,6 @@ QUnit.module('#listHiddenAssignments', hooks => {
 
 QUnit.module('Gradebook#showNotesColumn', {
   setup() {
-    sandbox.stub(DataLoader, 'getDataForColumn')
     const teacherNotes = {
       id: '2401',
       title: 'Notes',
@@ -2039,6 +2051,7 @@ QUnit.module('Gradebook#showNotesColumn', {
       hidden: true
     }
     this.gradebook = createGradebook({teacher_notes: teacherNotes})
+    sandbox.stub(this.gradebook.dataLoader, 'loadCustomColumnData')
     sandbox.stub(this.gradebook, 'toggleNotesColumn')
   }
 })
@@ -2046,20 +2059,20 @@ QUnit.module('Gradebook#showNotesColumn', {
 test('loads the notes if they have not yet been loaded', function() {
   this.gradebook.teacherNotesNotYetLoaded = true
   this.gradebook.showNotesColumn()
-  equal(DataLoader.getDataForColumn.callCount, 1)
+  strictEqual(this.gradebook.dataLoader.loadCustomColumnData.callCount, 1)
 })
 
 test('loads the notes using the teacher notes column id', function() {
   this.gradebook.teacherNotesNotYetLoaded = true
   this.gradebook.showNotesColumn()
-  const [columnId] = DataLoader.getDataForColumn.lastCall.args
+  const [columnId] = this.gradebook.dataLoader.loadCustomColumnData.lastCall.args
   strictEqual(columnId, '2401')
 })
 
 test('does not load the notes if they are already loaded', function() {
   this.gradebook.teacherNotesNotYetLoaded = false
   this.gradebook.showNotesColumn()
-  equal(DataLoader.getDataForColumn.callCount, 0)
+  strictEqual(this.gradebook.dataLoader.loadCustomColumnData.callCount, 0)
 })
 
 QUnit.module('Gradebook#getTeacherNotesViewOptionsMenuProps')
@@ -2553,7 +2566,7 @@ QUnit.module('Gradebook#setTeacherNotesHidden - showing teacher notes', {
       setColumns() {},
       setNumberOfColumnsToFreeze() {}
     }
-    sandbox.stub(DataLoader, 'getDataForColumn')
+    sandbox.stub(this.gradebook.dataLoader, 'loadCustomColumnData')
     sandbox.stub(this.gradebook, 'reorderCustomColumns')
     sandbox.stub(this.gradebook, 'renderViewOptionsMenu')
   }
@@ -5181,7 +5194,6 @@ QUnit.module('Gradebook Grading Schemes', suiteHooks => {
 
   suiteHooks.beforeEach(() => {
     setFixtureHtml($fixtures)
-    stubDataLoader()
   })
 
   suiteHooks.afterEach(() => {
@@ -9471,34 +9483,105 @@ QUnit.module('Gradebook#getSubmission', hooks => {
   })
 })
 
-QUnit.module('Gradebook', () => {
-  QUnit.module('Post Policies', hooks => {
-    let $container
-    let gradebook
-    let options
+QUnit.module('Gradebook', suiteHooks => {
+  let $container
+  let gradebook
+  let options
 
-    hooks.beforeEach(() => {
-      $container = document.body.appendChild(document.createElement('div'))
-      setFixtureHtml($container)
-      stubDataLoader()
+  suiteHooks.beforeEach(() => {
+    $container = document.body.appendChild(document.createElement('div'))
+    setFixtureHtml($container)
 
-      options = {
-        post_policies_enabled: true
-      }
+    options = {}
+  })
+
+  suiteHooks.afterEach(() => {
+    gradebook.destroy()
+    $container.remove()
+  })
+
+  QUnit.module('#_updateEssentialDataLoaded()', () => {
+    function createInitializedGradebook() {
+      gradebook = createGradebook(options)
+      sinon.stub(gradebook.dataLoader, 'loadInitialData')
+      sinon.stub(gradebook, 'finishRenderingUI')
+      gradebook.initialize()
+
+      gradebook.setStudentIdsLoaded(true)
+      gradebook.setAssignmentGroupsLoaded(true)
+      gradebook.setContextModulesLoaded(true)
+      gradebook.setCustomColumnsLoaded(true)
+    }
+
+    function waitForTick() {
+      return new Promise(resolve => setTimeout(resolve, 0))
+    }
+
+    test('finishes rendering the UI when all essential data is loaded', async () => {
+      createInitializedGradebook()
+      gradebook._updateEssentialDataLoaded()
+      await waitForTick()
+      strictEqual(gradebook.finishRenderingUI.callCount, 1)
     })
 
-    hooks.afterEach(() => {
-      gradebook.destroy()
-      $container.remove()
+    test('does not finish rendering the UI when student ids are not loaded', async () => {
+      createInitializedGradebook()
+      gradebook.setStudentIdsLoaded(false)
+      gradebook._updateEssentialDataLoaded()
+      await waitForTick()
+      strictEqual(gradebook.finishRenderingUI.callCount, 0)
     })
 
-    QUnit.module('when Post Policies is enabled', contextHooks => {
+    test('does not finish rendering the UI when context modules are not loaded', async () => {
+      createInitializedGradebook()
+      gradebook.setContextModulesLoaded(false)
+      gradebook._updateEssentialDataLoaded()
+      await waitForTick()
+      strictEqual(gradebook.finishRenderingUI.callCount, 0)
+    })
+
+    test('does not finish rendering the UI when custom columns are not loaded', async () => {
+      createInitializedGradebook()
+      gradebook.setCustomColumnsLoaded(false)
+      gradebook._updateEssentialDataLoaded()
+      await waitForTick()
+      strictEqual(gradebook.finishRenderingUI.callCount, 0)
+    })
+
+    test('does not finish rendering the UI when assignment groups are not loaded', async () => {
+      createInitializedGradebook()
+      gradebook.setAssignmentGroupsLoaded(false)
+      gradebook._updateEssentialDataLoaded()
+      await waitForTick()
+      strictEqual(gradebook.finishRenderingUI.callCount, 0)
+    })
+
+    QUnit.module('when the course uses grading periods', contextHooks => {
       contextHooks.beforeEach(() => {
-        gradebook = createGradebook(options)
+        options = {
+          grading_period_set: {
+            grading_periods: [
+              {id: '1501', weight: 50},
+              {id: '1502', weight: 50}
+            ],
+            id: '1401',
+            weighted: true
+          }
+        }
+        createInitializedGradebook()
       })
 
-      test('attaches the Post Policies feature module to Gradebook', () => {
-        ok(gradebook.postPolicies instanceof PostPolicies)
+      test('finishes rendering the UI when all essential data is loaded', async () => {
+        gradebook.setGradingPeriodAssignmentsLoaded(true)
+        gradebook._updateEssentialDataLoaded()
+        await waitForTick()
+        strictEqual(gradebook.finishRenderingUI.callCount, 1)
+      })
+
+      test('does not finish rendering the UI when grading period assignments are not loaded', async () => {
+        gradebook._updateEssentialDataLoaded()
+        await waitForTick()
+        strictEqual(gradebook.finishRenderingUI.callCount, 0)
       })
     })
   })

@@ -24,6 +24,11 @@ describe "Conferences API", type: :request do
   include Api::V1::Json
   include Api
 
+  def named_context_url(context, type, conf)
+    raise unless type == :context_conference_url
+    "/#{context.class.name.downcase}s/#{context.id}/conferences/#{conf.id}"
+  end
+
   before :once do
     # these specs need an enabled web conference plugin
     @plugin = PluginSetting.create!(name: 'wimba')
@@ -119,6 +124,11 @@ describe "Conferences API", type: :request do
         group = group_category.groups.first
         group.add_user(student)
         group
+      end
+
+      it "returns an empty array if conferences are not configured" do
+        @plugin.update_attribute(:disabled, true)
+        expect(conference_json_ids).to be_empty
       end
 
       describe "course conferences" do
